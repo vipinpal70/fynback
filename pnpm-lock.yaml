@@ -48,6 +48,9 @@ importers:
       '@clerk/nextjs':
         specifier: ^7.0.6
         version: 7.0.6(next@16.2.1)(react-dom@19.2.4)(react@19.2.4)
+      '@fynback/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@fynback/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -57,6 +60,9 @@ importers:
       '@fynback/redis':
         specifier: workspace:*
         version: link:../../packages/redis
+      '@fynback/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       bullmq:
         specifier: ^5.0.0
         version: 5.71.0
