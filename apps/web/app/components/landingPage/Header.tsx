@@ -8,17 +8,13 @@ export default function HeaderComponent() {
 	const [isOpen, setIsOpen] = useState(false);
 
 	useEffect(() => {
-		if (isOpen) {
-			document.body.style.overflow = "hidden";
-		} else {
-			document.body.style.overflow = "";
-		}
+		document.body.style.overflow = isOpen ? "hidden" : "";
 	}, [isOpen]);
 
 	return (
 		<>
 			{/* NAVBAR */}
-			<nav className="sticky top-0 z-50 h-[60px] bg-[#08090c]/85 backdrop-blur-[8px] border-b border-line px-6 md:px-10 flex items-center justify-between">
+			<nav className="sticky top-0 z-[1001] h-[60px] bg-[#08090c]/85 backdrop-blur-[8px] border-b border-line px-6 md:px-10 flex items-center justify-between">
 				<Link href="/" className="flex items-center gap-1.5" aria-label="FynBack Home">
 					<svg
 						width="20"
@@ -67,61 +63,19 @@ export default function HeaderComponent() {
 					</Link>
 				</div>
 
-				{/* MOBILE BUTTON */}
+				{/* MOBILE TOGGLE — single button in navbar, swaps between Menu and X */}
 				<button
-					className="md:hidden p-6 -mr-6 text-silver hover:text-white relative z-[999] touch-manipulation"
-					onClick={(e) => {
-						e.preventDefault();
-						console.log("Menu button clicked");
-						setIsOpen(true);
-					}}
-					onTouchStart={(e) => {
-						e.preventDefault();
-						console.log("Menu button touched");
-						setIsOpen(true);
-					}}
-					aria-label="Open menu"
-					style={{
-						minHeight: "48px",
-						minWidth: "48px",
-						position: "relative",
-						zIndex: 9999,
-					}}
+					className="md:hidden text-silver hover:text-white"
+					onClick={() => setIsOpen((o) => !o)}
+					aria-label={isOpen ? "Close menu" : "Open menu"}
 				>
-					<Menu size={28} />
+					{isOpen ? <X size={28} /> : <Menu size={28} />}
 				</button>
 			</nav>
 
-			{/* MOBILE MENU */}
+			{/* MOBILE MENU OVERLAY — sits below the sticky navbar (pt-[60px]) */}
 			{isOpen && (
-				<div className="fixed inset-0 z-[1000] bg-black flex flex-col">
-					{/* CLOSE BUTTON */}
-					<div className="flex justify-end p-6">
-						<button
-							onClick={(e) => {
-								e.preventDefault();
-								console.log("Close button clicked");
-								setIsOpen(false);
-							}}
-							onTouchStart={(e) => {
-								e.preventDefault();
-								console.log("Close button touched");
-								setIsOpen(false);
-							}}
-							className="p-6 -mr-6 text-silver hover:text-white relative z-[1001] touch-manipulation"
-							aria-label="Close menu"
-							style={{
-								minHeight: "48px",
-								minWidth: "48px",
-								position: "relative",
-								zIndex: 10002,
-							}}
-						>
-							<X size={32} />
-						</button>
-					</div>
-
-					{/* MENU ITEMS */}
+				<div className="fixed inset-0 z-[1000] bg-black pt-[60px] flex flex-col">
 					<div className="flex flex-col items-center justify-center flex-1 gap-10 text-[28px] font-semibold text-white">
 						<a href="#how-it-works" onClick={() => setIsOpen(false)}>
 							How it works
@@ -135,7 +89,6 @@ export default function HeaderComponent() {
 						<a href="#blog" onClick={() => setIsOpen(false)}>
 							Blog
 						</a>
-
 						<Link
 							href="/dashboard"
 							onClick={() => setIsOpen(false)}
