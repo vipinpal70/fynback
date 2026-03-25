@@ -1,0 +1,11 @@
+{
+  "name": "@fynback/crypto",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "crypto-js": "^4.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0"
+  }
+}

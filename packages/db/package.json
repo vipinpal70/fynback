@@ -1,0 +1,16 @@
+{
+  "name": "@fynback/db",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.39.3",
+    "postgres": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "drizzle-kit": "^0.30.0"
+  }
+}

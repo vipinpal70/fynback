@@ -1,0 +1,11 @@
+{
+  "name": "@fynback/shared",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "typescript": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0"
+  }
+}

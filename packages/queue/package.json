@@ -1,0 +1,13 @@
+{
+  "name": "@fynback/queue",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@fynback/redis": "workspace:*",
+    "bullmq": "^5.0.0",
+    "ioredis": "5.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0"
+  }
+}
