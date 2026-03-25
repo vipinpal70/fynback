@@ -1,54 +1,29 @@
-name: Deploy to Hostinger VPS
+name: Deploy Worker to Railway
 
 on:
   push:
     branches:
-      - main
+      - master
+    paths:
+      - 'apps/worker/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
 
-  # Allow manual trigger from GitHub Actions UI
   workflow_dispatch:
 
 jobs:
-  deploy:
-    name: Build & Deploy
+  deploy-worker:
+    name: Deploy BullMQ Worker
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
-      - name: Checkout (for any pre-deploy checks)
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # ── SSH into VPS and deploy ──────────────────────────────────────────────
-      - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT || 22 }}
-          script_stop: true   # abort on first error
-          script: |
-            set -e
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
 
-            echo "==> Pulling latest code..."
-            cd /var/www/fynback
-            git pull origin main
-
-            echo "==> Installing dependencies..."
-            pnpm install --frozen-lockfile
-
-            echo "==> Building Next.js app..."
-            # Only build the web app — worker runs from source with tsx
-            pnpm turbo build --filter=fynback
-
-            echo "==> Creating log directory..."
-            mkdir -p /var/www/fynback/logs
-
-            echo "==> Restarting processes..."
-            pm2 restart ecosystem.config.cjs --update-env
-
-            echo "==> Saving PM2 process list..."
-            pm2 save
-
-            echo "==> Deploy complete!"
-            pm2 ls
+      - name: Deploy worker to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service fynback-worker
