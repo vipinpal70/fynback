@@ -4,7 +4,23 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [".next/**", "dist/**"]
+      "outputs": [".next/**", "dist/**"],
+      "env": [
+        "NODE_ENV",
+        "DATABASE_URL",
+        "ENCRYPTION_SECRET",
+        "REDIS_URL",
+        "CLERK_SECRET_KEY",
+        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+        "CLERK_WEBHOOK_SECRET",
+        "RESEND_API_KEY",
+        "RAZORPAY_API_KEY",
+        "RAZORPAY_API_SECRET",
+        "STRIPE_SECRET_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+        "MSG91_AUTH_KEY",
+        "INTERAKT_API_KEY"
+      ]
     },
     "lint": {
       "dependsOn": ["^lint"]
