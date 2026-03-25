@@ -238,7 +238,7 @@ async function dispatchInitialEmailJob(
   db: ReturnType<typeof createDb>,
   failedPaymentId: string,
   merchantId: string,
-  normalized: ReturnType<typeof normalizeWebhook> extends { skip: false; data: infer T } ? T : never
+  normalized: Extract<ReturnType<typeof normalizeWebhook>, { skip: false }>['data']
 ) {
   const { merchantBrandSettings, eq } = await import('@fynback/db');
 
