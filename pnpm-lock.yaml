@@ -213,6 +213,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@fynback/shared':
+        specifier: workspace:*
+        version: link:../shared
       drizzle-orm:
         specifier: 0.39.3
         version: 0.39.3(pg@8.20.0)(postgres@3.4.8)
