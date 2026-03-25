@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 
 export default function Footer() {
@@ -63,34 +64,39 @@ export default function Footer() {
 						</div>
 						<ul className="space-y-3 font-body text-[15px] text-silver">
 							<li>
-								<a href="#" className="hover:text-silver transition-colors">
+								<a href="#" className="hover:text-white transition-colors">
 									About
 								</a>
 							</li>
 							<li>
-								<a href="#" className="hover:text-silver transition-colors">
+								<a href="#" className="hover:text-white transition-colors">
 									Blog
 								</a>
 							</li>
 							<li>
-								<a href="#" className="hover:text-silver transition-colors">
+								<a href="#" className="hover:text-white transition-colors">
 									Careers
 								</a>
 							</li>
 							<li>
-								<a href="#" className="hover:text-silver transition-colors">
+								<Link href="/contact" className="hover:text-white transition-colors">
+									Contact
+								</Link>
+							</li>
+							<li>
+								<Link href="/privacy-policy" className="hover:text-white transition-colors">
 									Privacy Policy
-								</a>
+								</Link>
 							</li>
 							<li>
-								<a href="#" className="hover:text-silver transition-colors">
-									Terms of Service
-								</a>
+								<Link href="/terms" className="hover:text-white transition-colors">
+									Terms & Conditions
+								</Link>
 							</li>
 							<li>
-								<a href="#" className="hover:text-silver transition-colors">
-									Security
-								</a>
+								<Link href="/refund-policy" className="hover:text-white transition-colors">
+									Refund Policy
+								</Link>
 							</li>
 						</ul>
 					</div>
@@ -165,8 +171,12 @@ export default function Footer() {
 				</div>
 
 				<div className="pt-8 border-t border-line flex flex-col md:flex-row justify-between items-center gap-4">
-					<div className="font-body text-[15px] text-silver">
-						© 2025 FynBack Technologies Pvt. Ltd.
+					<div className="font-body text-[13px] text-silver flex flex-wrap items-center gap-x-4 gap-y-2">
+						<span>© 2026 FynBack Technologies Pvt. Ltd.</span>
+						<Link href="/privacy-policy" className="hover:text-white transition-colors">Privacy</Link>
+						<Link href="/terms" className="hover:text-white transition-colors">Terms</Link>
+						<Link href="/refund-policy" className="hover:text-white transition-colors">Refunds</Link>
+						<Link href="/contact" className="hover:text-white transition-colors">Contact</Link>
 					</div>
 					<div className="flex gap-4">
 						<a
