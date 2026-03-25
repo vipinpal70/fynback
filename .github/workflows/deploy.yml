@@ -35,8 +35,8 @@ jobs:
             echo "==> Installing dependencies..."
             pnpm install --frozen-lockfile
 
-            echo "==> Building Next.js app..."
-            pnpm turbo build --filter=fynback
+            echo "==> Building Next.js app and worker..."
+            pnpm turbo build --filter=fynback --filter=@fynback/worker
 
             echo "==> Creating log directory..."
             mkdir -p /var/www/fynback/logs

@@ -36,10 +36,11 @@ module.exports = {
     {
       name: 'fynback-worker',
       cwd: `${APP_ROOT}/apps/worker`,
-      // tsx runs TypeScript directly — no compile step needed since all
-      // packages use "main": "src/index.ts" (TS-first monorepo)
-      script: `${APP_ROOT}/node_modules/.bin/tsx`,
-      args: 'src/index.ts',
+      // Runs the compiled JS bundle (built by tsup).
+      // fork_mode required — cluster_mode only works with plain JS entry points,
+      // not shell script wrappers like tsx.
+      script: 'dist/index.js',
+      exec_mode: 'fork',
       instances: 1,
       autorestart: true,
       watch: false,
