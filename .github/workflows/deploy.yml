@@ -35,6 +35,10 @@ jobs:
             echo "==> Installing dependencies..."
             pnpm install --frozen-lockfile
 
+            echo "==> Clearing stale build artifacts and Turbo cache..."
+            rm -rf apps/web/.next
+            rm -rf .turbo
+
             echo "==> Building Next.js app and worker..."
             pnpm turbo build --filter=fynback --filter=@fynback/worker
 
