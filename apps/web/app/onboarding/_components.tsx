@@ -242,7 +242,7 @@ export function StepPlan({
 				currency,
 				name: "FynBack Trial Activation",
 				description: `Activate 14-day free trial for ${values.plan} plan`,
-                image: "https://FynBack.in/logo.png",
+                image: "/fb_logo.png",
 				order_id: orderId,
 				handler: async (response: any) => {
 					const verifyRes = await verifyTrialPayment(
