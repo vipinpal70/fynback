@@ -40,7 +40,7 @@ export function startWelcomeWorker() {
       console.log(`[WelcomeWorker] Processing welcome email for ${email} (${fullName})`);
 
       const { data, error } = await resend.emails.send({
-        from: 'FynBack <welcome@fynback.com>',
+        from: 'FynBack <no-reply@fynback.com>',
         to: email,
         subject: `Welcome to FynBack, ${fullName}! Your trial has started.`,
         html: `
@@ -69,11 +69,13 @@ body {
     text-align: center;
     border-bottom: 1px solid #1f2937;
 }
-.header h1 { margin: 0; font-size: 26px; color: #a855f7; }
-.header p { margin-top: 6px; font-size: 13px; color: #9ca3af; }
+.header h1 { margin: 0; font-size: 26px; }
+.header h1 .fyn { color: #22c55e; }
+.header h1 .back { color: #ffffff; }
+.header p { margin-top: 6px; font-size: 13px; color: #cbd5e1; }
 .hero { padding: 28px 32px; text-align: center; }
 .hero h2 { font-size: 22px; margin-bottom: 10px; color: #f9fafb; }
-.hero p { font-size: 14px; color: #9ca3af; }
+.hero p { font-size: 14px; color: #cbd5e1; }
 .revenue-box {
     margin: 24px 32px;
     padding: 18px;
@@ -83,7 +85,7 @@ body {
     text-align: center;
 }
 .revenue-box strong { display: block; font-size: 20px; color: #22c55e; }
-.revenue-box span { font-size: 13px; color: #9ca3af; }
+.revenue-box span { font-size: 13px; color: #cbd5e1; }
 .trial-box {
     margin: 20px 32px;
     padding: 14px;
@@ -91,12 +93,13 @@ body {
     background: #1f2937;
     text-align: center;
     font-size: 13px;
+    color: #e2e8f0;
 }
 .trial-box strong { color: #f59e0b; }
 .steps { padding: 0 32px; }
 .step { margin-bottom: 18px; }
 .step strong { display: block; color: #f9fafb; margin-bottom: 4px; }
-.step span { font-size: 13px; color: #9ca3af; }
+.step span { font-size: 13px; color: #cbd5e1; }
 .cta { text-align: center; margin: 32px; }
 .cta a {
     display: inline-block;
@@ -115,13 +118,13 @@ body {
     border-radius: 10px;
     border-left: 3px solid #a855f7;
 }
-.founder p { font-size: 13px; color: #d1d5db; margin: 0 0 10px; }
+.founder p { font-size: 13px; color: #e2e8f0; margin: 0 0 10px; }
 .footer {
     background: #020617;
     padding: 20px;
     text-align: center;
     font-size: 12px;
-    color: #6b7280;
+    color: #94a3b8;
     border-top: 1px solid #1f2937;
 }
 </style>
@@ -129,7 +132,7 @@ body {
 <body>
 <div class="container">
     <div class="header">
-        <h1>FynBack</h1>
+        <h1><span class="fyn">Fyn</span><span class="back">Back</span></h1>
         <p>The smart payment recovery engine</p>
     </div>
     <div class="hero">
@@ -171,7 +174,7 @@ body {
     <div class="footer">
         <p>© 2026 FynBack Inc.</p>
         <p>Gurugram, India</p>
-        <p><a href="https://fynback.com/unsubscribe" style="color:#6b7280;">Unsubscribe</a></p>
+        <p><a href="https://fynback.com/unsubscribe" style="color:#94a3b8;">Unsubscribe</a></p>
     </div>
 </div>
 </body>

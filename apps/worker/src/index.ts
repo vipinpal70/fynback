@@ -17,6 +17,7 @@
  *
  * WORKERS STARTED HERE:
  *   startWelcomeWorker()   → Sends branded welcome email after merchant onboarding
+ *   startGatewayWorker()   → Sends gateway-connected email with webhook setup instructions
  *   startRecoveryWorker()  → Core payment recovery engine (retry + email + WhatsApp + SMS)
  *
  * GRACEFUL SHUTDOWN:
@@ -31,6 +32,7 @@
 // 'dotenv/config' is a side-effect import that runs synchronously before other modules.
 import 'dotenv/config';
 import { startWelcomeWorker } from './workers/welcome.worker';
+import { startGatewayWorker } from './workers/gateway.worker';
 import { startRecoveryWorker } from './workers/recovery.worker';
 
 console.log('[Worker] FynBack Worker process starting...');
@@ -39,6 +41,9 @@ console.log('[Worker] FynBack Worker process starting...');
 
 // Onboarding welcome email (sends branded email after merchant signup)
 const welcomeWorker = startWelcomeWorker();
+
+// Gateway-connected email (webhook setup instructions after gateway is linked)
+const gatewayWorker = startGatewayWorker();
 
 // Core payment recovery engine — THE HEART OF FYNBACK
 // Processes: retry_payment | send_email | send_whatsapp | send_sms jobs
@@ -62,6 +67,7 @@ process.on('SIGTERM', async () => {
   // Close all workers — waits for in-progress jobs to complete
   await Promise.all([
     welcomeWorker.close(),
+    gatewayWorker.close(),
     recoveryWorker.close(),
   ]);
 
@@ -78,6 +84,7 @@ process.on('SIGINT', async () => {
 
   await Promise.all([
     welcomeWorker.close(),
+    gatewayWorker.close(),
     recoveryWorker.close(),
   ]);
 

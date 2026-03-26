@@ -5,6 +5,10 @@ export * from './connection';
 export * from './queues/welcome.queue';
 export * from './types/welcome.types';
 
+// Gateway connected notification queue
+export * from './queues/gateway.queue';
+export * from './types/gateway.types';
+
 // Payment recovery queues — core to the product
 // recoveryQueue: retries + email + WhatsApp + SMS jobs
 // analyticsQueue: daily snapshot computation

@@ -9,7 +9,7 @@
  * Returns: { connectionId, gatewayName, testMode, webhookUrl, webhookSecret, sync }
  */
 
-import { auth } from '@clerk/nextjs/server';
+import { auth, clerkClient } from '@clerk/nextjs/server';
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getMerchantIdFromClerkUserId } from '@/lib/merchant';
@@ -17,6 +17,7 @@ import { encrypt } from '@/lib/crypto';
 import { validateCredentials, isTestKey } from '@/lib/gateways/razorpay';
 import { syncGatewayHistory } from '@/lib/gateways/sync';
 import { createDb, gatewayConnections, eq, and } from '@fynback/db';
+import { gatewayQueue } from '@fynback/queue';
 
 const db = createDb(process.env.DATABASE_URL!);
 
@@ -123,6 +124,32 @@ export async function POST(req: NextRequest) {
       console.error('[gateways/connect] sync error:', err);
       // Don't fail the connection — sync can be retried
     }
+  }
+
+  // ── 4. Enqueue gateway-connected email ───────────────────────────────────────
+  try {
+    const client = await clerkClient();
+    const clerkUser = await client.users.getUser(userId);
+    const userEmail = clerkUser.emailAddresses[0]?.emailAddress;
+    const fullName =
+      [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') ||
+      clerkUser.username ||
+      'there';
+
+    if (userEmail) {
+      await gatewayQueue.add('gateway-connected', {
+        email: userEmail,
+        fullName,
+        gatewayName: gateway,
+        webhookUrl: conn.webhookUrl ?? webhookUrl,
+        webhookSecret,
+        testMode,
+      });
+      console.log(`[gateways/connect] gateway-connected email job enqueued for ${userEmail}`);
+    }
+  } catch (err) {
+    // Non-critical — don't fail the connection if the email job fails to enqueue
+    console.error('[gateways/connect] failed to enqueue gateway-connected email:', err);
   }
 
   return NextResponse.json({
