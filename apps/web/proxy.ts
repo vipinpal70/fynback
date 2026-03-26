@@ -13,9 +13,14 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
         return redirectToSignIn({ returnBackUrl: req.url })
     }
 
-    // 2. Determine onboarding status from JWT (Session Claims)
+    // 2. Determine onboarding status from JWT (Session Claims) OR cookie fallback.
+    // The JWT is cached and may not reflect publicMetadata immediately after completeOnboarding runs.
+    // The server action sets rcvrx_ob=1 cookie synchronously, so we use it as the source of truth
+    // until the JWT refreshes on the next session rotation.
     // IMPORTANT: Ensure "publicMetadata" is added to your Session Tokens in Clerk Dashboard
-    const onboardingComplete = (sessionClaims as any)?.metadata?.onboardingComplete === true
+    const onboardingComplete =
+        (sessionClaims as any)?.metadata?.onboardingComplete === true ||
+        req.cookies.get('rcvrx_ob')?.value === '1'
 
     // 3. Logic for Authenticated users
     if (userId) {
