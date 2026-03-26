@@ -19,7 +19,7 @@ module.exports = {
       name: 'fynback-web',
       cwd: `${APP_ROOT}/apps/web`,
       script: 'node_modules/.bin/next',
-      args: 'start --port 3000',
+      args: 'start',
       instances: 1,
       autorestart: true,
       watch: false,
