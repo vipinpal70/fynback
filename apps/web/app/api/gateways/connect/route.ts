@@ -14,7 +14,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getMerchantIdFromClerkUserId } from '@/lib/merchant';
 import { encrypt } from '@/lib/crypto';
-import { validateCredentials, isTestKey } from '@/lib/gateways/razorpay';
+import { validateCredentials, isTestKey as isRazorpayTestKey } from '@/lib/gateways/razorpay';
+import { isTestKey as isCashfreeTestKey } from '@/lib/gateways/cashfree';
 import { syncGatewayHistory } from '@/lib/gateways/sync';
 import { createDb, gatewayConnections, eq, and } from '@fynback/db';
 import { gatewayQueue } from '@fynback/queue';
@@ -58,7 +59,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const testMode = isTestKey(apiKey);
+  const testMode =
+    gateway === 'cashfree' ? isCashfreeTestKey(apiKey, apiSecret) :
+    gateway === 'razorpay' ? isRazorpayTestKey(apiKey) :
+    false;
   const webhookSecret = crypto.randomBytes(24).toString('hex');
   const webhookUrl = `${APP_URL}/api/webhooks/${gateway}`;
 

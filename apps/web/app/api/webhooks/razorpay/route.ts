@@ -28,10 +28,19 @@ import { NextResponse } from 'next/server';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { createDb, gatewayConnections, failedPayments, recoveryJobs, eq, and, isNull } from '@fynback/db';
 import { recoveryQueue } from '@fynback/queue';
-import type { SendEmailJobData, RetryPaymentJobData } from '@fynback/queue';
+import type { SendEmailJobData, RetryPaymentJobData, SendWhatsAppJobData } from '@fynback/queue';
 import { decrypt } from '@/lib/crypto';
 import { categorizeDecline, mapPaymentMethod } from '@/lib/gateways/razorpay';
 import { getRetrySchedule } from '@/lib/recovery/retry-scheduler';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+/**
+ * Razorpay substitutes this address when the customer has no email on file.
+ * It is not a real customer email — treat it as null so we don't dispatch
+ * email campaigns to a Razorpay-owned inbox.
+ */
+const RAZORPAY_VOID_EMAIL = 'void@razorpay.com';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,6 +72,19 @@ const MAX_RETRIES: Record<string, number> = {
   emi: 0,
 };
 
+// ─── Contact Channel ──────────────────────────────────────────────────────────
+
+type ContactChannel = 'email' | 'phone' | 'both' | 'none';
+
+function getContactChannel(email: string | null, phone: string | null): ContactChannel {
+  const hasEmail = !!email;
+  const hasPhone = !!phone;
+  if (hasEmail && hasPhone) return 'both';
+  if (hasEmail) return 'email';
+  if (hasPhone) return 'phone';
+  return 'none';
+}
+
 // ─── Signature Verification ───────────────────────────────────────────────────
 
 function verifySignature(rawBody: string, signature: string, secret: string): boolean {
@@ -92,7 +114,7 @@ function normalizePaymentFailed(
     order_id: payment.order_id ?? null,
     subscription_id: payment.subscription_id ?? null,
     customer_id: payment.customer_id ?? null,
-    email: payment.email ?? null,
+    email: payment.email && payment.email !== RAZORPAY_VOID_EMAIL ? payment.email : null,
     contact: payment.contact ?? null,
     amount: payment.amount ?? 0,
     currency: payment.currency ?? 'INR',
@@ -338,8 +360,30 @@ export async function POST(request: Request) {
   }
 
   // ── Dispatch recovery job ───────────────────────────────────────────────────
+  const contactChannel = getContactChannel(normalized.customerEmail, normalized.customerPhone);
+
+  // No way to reach this customer — record it and stop.
+  // Dashboard will show the payment with a "No contact info" badge.
+  // Merchant should look up the customer in their gateway dashboard manually.
+  if (contactChannel === 'none') {
+    await db
+      .update(failedPayments)
+      .set({ status: 'cancelled', updatedAt: new Date() })
+      .where(eq(failedPayments.id, inserted.id));
+    console.log(`[Razorpay Webhook] merchant=${merchantId} event=${event} payment=${inserted.id} — no contact info, marked cancelled`);
+    return NextResponse.json({ received: true, event, failedPaymentId: inserted.id, action: 'no_contact' });
+  }
+
   const brand = await getBrandSettings(db, merchantId);
 
+  // Phone-only (void@razorpay.com was sanitized to null): skip email, go straight to WhatsApp
+  if (contactChannel === 'phone') {
+    await dispatchWhatsAppJob(db, inserted.id, merchantId, normalized, 1);
+    console.log(`[Razorpay Webhook] merchant=${merchantId} event=${event} payment=${inserted.id} — phone-only, WhatsApp dispatched`);
+    return NextResponse.json({ received: true, event, failedPaymentId: inserted.id });
+  }
+
+  // Has email (contactChannel === 'email' | 'both') — use normal retry → email sequence
   if (!normalized.isRecoverable || normalized.paymentMethodType === 'net_banking') {
     // Skip straight to email — can't auto-retry these
     await dispatchEmailJob(db, inserted.id, merchantId, normalized, 1, brand);
@@ -401,6 +445,57 @@ async function getBrandSettings(db: ReturnType<typeof createDb>, merchantId: str
   const { eq } = await import('@fynback/db');
   const rows = await db.select().from(merchantBrandSettings).where(eq(merchantBrandSettings.merchantId, merchantId)).limit(1);
   return rows[0] ?? null;
+}
+
+async function dispatchWhatsAppJob(
+  db: ReturnType<typeof createDb>,
+  failedPaymentId: string,
+  merchantId: string,
+  normalized: NormalizedPayment,
+  stepNumber: number,
+) {
+  const amountRupees = `₹${(normalized.amountPaise / 100).toLocaleString('en-IN')}`;
+  const job = await recoveryQueue.add(
+    'send_whatsapp',
+    {
+      type: 'send_whatsapp',
+      failedPaymentId,
+      merchantId,
+      recoveryJobDbId: '',
+      amountPaise: normalized.amountPaise,
+      currency: normalized.currency,
+      customerPhone: normalized.customerPhone ?? undefined,
+      customerName: normalized.customerName ?? undefined,
+      gatewayName: 'razorpay',
+      gatewayPaymentId: normalized.gatewayPaymentId ?? '',
+      gatewaySubscriptionId: normalized.gatewaySubscriptionId ?? undefined,
+      stepNumber,
+      // Template must be pre-approved in the merchant's WhatsApp Business account
+      templateName: 'payment_failed_reminder_v1',
+      templateVariables: [
+        normalized.customerName ?? 'there',
+        amountRupees,
+      ],
+    } satisfies SendWhatsAppJobData,
+    { priority: 1 }
+  );
+
+  await db.insert(recoveryJobs).values({
+    failedPaymentId,
+    merchantId,
+    bullmqJobId: job.id,
+    jobType: 'send_whatsapp',
+    status: 'pending',
+    attemptNumber: stepNumber,
+    scheduledAt: new Date(),
+  });
+
+  await db
+    .update(failedPayments)
+    .set({ status: 'whatsapp_sent', updatedAt: new Date() })
+    .where(eq(failedPayments.id, failedPaymentId));
+
+  return job;
 }
 
 async function dispatchEmailJob(

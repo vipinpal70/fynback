@@ -40,6 +40,7 @@ import { Pagination, PaginationContent, PaginationItem, PaginationLink, Paginati
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Plus_Jakarta_Sans, DM_Sans, JetBrains_Mono } from "next/font/google";
 import type { RecentPayment } from "@/lib/cache/dashboard";
+import { resolveCustomerDisplay } from "@/lib/utils";
 
 const plusJakarta = Plus_Jakarta_Sans({ subsets: ["latin"], weight: ["500", "600", "700"] });
 const dmSans = DM_Sans({ subsets: ["latin"], weight: ["400", "500"] });
@@ -436,6 +437,7 @@ export default function FailedPaymentsPage() {
       const q = globalSearch.toLowerCase();
       result = result.filter(p =>
         (p.customerEmail ?? "").toLowerCase().includes(q) ||
+        (p.customerPhone ?? "").includes(q) ||
         p.id.toLowerCase().includes(q) ||
         p.declineCategory.toLowerCase().includes(q) ||
         formatINR(p.amountPaise).includes(q)
@@ -888,7 +890,7 @@ export default function FailedPaymentsPage() {
                     const rowClass   = isSelected ? "bg-[var(--accent-blue-dim)]" : isAltRow ? "bg-[rgba(15,21,32,0.4)]" : "bg-transparent hover:bg-[var(--bg-overlay)]";
                     const mappedStatus = mapApiStatus(payment.status);
                     const probability  = deriveProbability(payment);
-                    const email = payment.customerEmail ?? payment.id;
+                    const email = resolveCustomerDisplay(payment.customerEmail, payment.customerPhone, payment.id);
 
                     return (
                       <React.Fragment key={payment.id}>
@@ -1046,7 +1048,7 @@ export default function FailedPaymentsPage() {
             {paginatedPayments.map((payment, i) => {
               const mappedStatus = mapApiStatus(payment.status);
               const probability  = deriveProbability(payment);
-              const email = payment.customerEmail ?? payment.id;
+              const email = resolveCustomerDisplay(payment.customerEmail, payment.customerPhone, payment.id);
               return (
                 <div key={payment.id} className="bg-[var(--bg-surface)] border border-[var(--border-strong)] rounded-xl py-[18px] px-[18px] hover:border-[var(--text-muted)] transition-colors">
                   <div className="flex justify-between items-start mb-4">

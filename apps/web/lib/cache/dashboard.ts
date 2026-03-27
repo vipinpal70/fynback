@@ -37,6 +37,7 @@ export interface DashboardKpis {
 export interface RecentPayment {
   id: string;
   customerEmail: string | null;
+  customerPhone: string | null;
   customerName: string | null;
   amountPaise: number;
   currency: string;
@@ -140,6 +141,7 @@ export async function getRecentPayments(
       return rows.map((r) => ({
         id: r.id,
         customerEmail: r.customerEmail ?? null,
+        customerPhone: r.customerPhone ?? null,
         customerName: r.customerName ?? null,
         amountPaise: r.amountPaise,
         currency: r.currency,

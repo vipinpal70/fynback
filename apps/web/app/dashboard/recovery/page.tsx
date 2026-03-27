@@ -35,7 +35,7 @@ import {
   Line,
   Cell
 } from "recharts";
-import { cn } from "@/lib/utils";
+import { cn, resolveCustomerDisplay } from "@/lib/utils";
 import CampaignTimeline, { TimelineStep } from "@/components/dashboard/CampaignTimeline";
 
 // --- STATIC DATA CONSTANTS ---
@@ -421,6 +421,7 @@ interface PaymentRecord {
   id: string;
   email?: string;
   customerEmail?: string;
+  customerPhone?: string;
   amount: number;
   currency?: string;
   gateway?: string;
@@ -459,7 +460,7 @@ export default function RecoveryPage() {
         // Map API data to pipeline cards, placing them in justFailed
         const mapped = payments.map((p, idx) => ({
           id: typeof p.id === "string" ? idx + 100 : Number(p.id) + 100,
-          email: p.email ?? p.customerEmail ?? `customer-${idx}@unknown.com`,
+          email: resolveCustomerDisplay(p.email ?? p.customerEmail, p.customerPhone, `customer-${idx}`),
           amount: p.currency === "INR" || !p.currency
             ? `₹${(p.amount / 100).toLocaleString("en-IN")}`
             : `₹${(p.amount / 100).toLocaleString("en-IN")}`,

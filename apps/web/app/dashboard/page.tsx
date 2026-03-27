@@ -22,7 +22,7 @@ import {
   CalendarDays, Download, ArrowUpRight, ArrowDownRight,
   X, Mail, MessageSquare, RefreshCw, Pause, Play, Unplug, CheckCircle,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, resolveCustomerDisplay } from "@/lib/utils";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip,
   ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar,
@@ -697,7 +697,7 @@ export default function DashboardPage() {
                 ) : (
                   payments.map((p) => (
                     <tr key={p.id} className="border-b border-border last:border-0 hover:bg-rx-overlay/50 transition-colors cursor-pointer">
-                      <td className="px-5 py-3 font-body text-rx-text-secondary">{p.customerEmail ?? "Unknown"}</td>
+                      <td className="px-5 py-3 font-body text-rx-text-secondary">{resolveCustomerDisplay(p.customerEmail, p.customerPhone)}</td>
                       <td className="px-4 py-3 text-right font-mono text-rx-text-primary">{formatRupee(p.amountPaise)}</td>
                       <td className="px-4 py-3">
                         <span className={cn("text-[11px] px-1.5 py-0.5 rounded-md font-body", gatewayPillStyles[p.gatewayName] ?? "bg-rx-overlay text-rx-text-secondary")}>

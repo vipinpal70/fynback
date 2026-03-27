@@ -7,7 +7,8 @@ import { welcomeQueue } from '@fynback/queue'
 import Razorpay from 'razorpay'
 import crypto from 'crypto'
 import { encrypt } from '@/lib/crypto'
-import { isTestKey } from '@/lib/gateways/razorpay'
+import { isTestKey as isRazorpayTestKey } from '@/lib/gateways/razorpay'
+import { isTestKey as isCashfreeTestKey } from '@/lib/gateways/cashfree'
 import { syncGatewayHistory } from '@/lib/gateways/sync'
 
 const db = createDb(process.env.DATABASE_URL!);
@@ -212,7 +213,10 @@ export const completeOnboarding = async (formData: FormData) => {
                         webhookSecretEncrypted: encrypt(webhookSecret),
                         webhookUrl: `${appUrl}/api/webhooks/${gatewayConnected}`,
                         isActive: true,
-                        testMode: isTestKey(gatewayApiKey),
+                        testMode:
+                            gatewayConnected === 'cashfree' ? isCashfreeTestKey(gatewayApiKey, gatewayApiSecret) :
+                            gatewayConnected === 'razorpay' ? isRazorpayTestKey(gatewayApiKey) :
+                            false,
                         connectedAt: new Date(),
                     })
                     .onConflictDoNothing()
