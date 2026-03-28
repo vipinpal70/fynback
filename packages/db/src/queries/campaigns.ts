@@ -258,7 +258,8 @@ export const campaignQueries = {
   },
 
   /**
-   * Gets all campaign templates for a merchant (their master campaigns + system defaults).
+   * Gets all campaign templates for a merchant (their master campaigns only).
+   * Does NOT include system defaults — use getSystemDefaultTemplates for those.
    */
   getMerchantCampaignTemplates: async (db: Database, merchantId: string) => {
     return db
@@ -266,6 +267,41 @@ export const campaignQueries = {
       .from(campaignTemplates)
       .where(eq(campaignTemplates.merchantId, merchantId))
       .orderBy(desc(campaignTemplates.createdAt));
+  },
+
+  /**
+   * Gets system default templates for a given plan.
+   * System defaults have merchant_id = NULL and type = 'system_default'.
+   *
+   * WHY BY PLAN: Each plan tier has its own system default sequence.
+   * trial/starter → 3-step gentle sequence
+   * growth        → 5-step sequence with pause offer at step 3
+   * scale         → 5-step sequence (same as growth to start; merchant adds more)
+   *
+   * Also includes lower-tier defaults so the merchant can see what they had before:
+   * growth merchant sees growth + starter defaults (for reference)
+   * scale merchant sees scale + growth + starter defaults
+   * trial/starter merchant sees only their own default
+   */
+  getSystemDefaultTemplates: async (db: Database, plan: string) => {
+    // Determine which plans to include based on merchant's current plan
+    const plansToShow: string[] =
+      plan === 'scale'  ? ['scale', 'growth', 'starter', 'trial'] :
+      plan === 'growth' ? ['growth', 'starter', 'trial'] :
+      plan === 'starter'? ['starter', 'trial'] :
+      ['trial'];
+
+    return db
+      .select()
+      .from(campaignTemplates)
+      .where(
+        and(
+          isNull(campaignTemplates.merchantId),
+          inArray(campaignTemplates.planRequired, plansToShow),
+          eq(campaignTemplates.isActive, true)
+        )
+      )
+      .orderBy(campaignTemplates.planRequired);
   },
 
   /**

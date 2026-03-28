@@ -43,15 +43,19 @@ export async function GET(req: NextRequest) {
 
     const db = getDb();
 
-    // Fetch runs + merchant info in parallel
-    const [rawRuns, merchantRows, merchantTemplates] = await Promise.all([
-      campaignQueries.getMerchantCampaignRuns(db, merchantId, limit, offset),
-      db.select({ plan: merchants.plan, companyName: merchants.companyName })
-        .from(merchants).where(eq(merchants.id, merchantId)).limit(1),
-      campaignQueries.getMerchantCampaignTemplates(db, merchantId),
-    ]);
-
+    // Fetch merchant info first (need plan to pick system defaults)
+    const merchantRows = await db
+      .select({ plan: merchants.plan, companyName: merchants.companyName })
+      .from(merchants).where(eq(merchants.id, merchantId)).limit(1);
     const merchant = merchantRows[0] ?? null;
+    const plan = merchant?.plan ?? 'trial';
+
+    // Fetch runs + templates in parallel (now that we have the plan)
+    const [rawRuns, merchantTemplates, systemTemplates] = await Promise.all([
+      campaignQueries.getMerchantCampaignRuns(db, merchantId, limit, offset),
+      campaignQueries.getMerchantCampaignTemplates(db, merchantId),
+      campaignQueries.getSystemDefaultTemplates(db, plan),
+    ]);
 
     // Enrich runs with payment data and template steps
     const enrichedRuns = await Promise.all(
@@ -91,9 +95,15 @@ export async function GET(req: NextRequest) {
       })
     );
 
-    // Enrich templates with steps
+    // Enrich all templates (system defaults + merchant masters) with their steps
+    // System defaults shown first, merchant masters after
+    const allTemplates = [
+      ...systemTemplates.map((t) => ({ ...t, isReadOnly: true })),
+      ...merchantTemplates.map((t) => ({ ...t, isReadOnly: false })),
+    ];
+
     const templatesWithSteps = await Promise.all(
-      merchantTemplates.map(async (t) => {
+      allTemplates.map(async (t) => {
         const steps = await db.select({
           id: campaignSteps.id,
           stepNumber: campaignSteps.stepNumber,
