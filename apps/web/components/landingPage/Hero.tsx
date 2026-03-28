@@ -310,7 +310,7 @@ const LiveFeed = () => {
 	}, [inView]);
 
 	return (
-		<div ref={containerRef} className="bg-[var(--ink)] border border-[var(--line-hi)] rounded-[12px] overflow-hidden flex flex-col h-[480px]">
+		<div ref={containerRef} className="bg-[var(--ink)] border border-[var(--line-hi)] rounded-[12px] overflow-hidden flex flex-col h-[380px] lg:h-[380px] xl:h-[400px] 2xl:h-[440px]">
 			<div className="h-[40px] bg-surface border-b border-line flex items-center justify-between px-4 sticky top-0 z-20 shrink-0">
 				<div className="flex gap-[6px]">
 					<div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
@@ -398,13 +398,13 @@ const LiveFeed = () => {
 function Hero() {
 	return (
 		<div>
-			<section className="min-h-[100svh] flex items-center px-6 lg:px-20 py-10 md:py-4">
-				<div className="w-full max-w-[1440px] mx-auto flex flex-col md:flex-row items-center gap-12 lg:gap-16 xl:gap-24">
+			<section className="min-h-[100svh] flex items-center px-6 lg:px-20 py-4 lg:py-2">
+				<div className="w-full max-w-[1440px] mx-auto flex flex-col md:flex-row items-center gap-8 lg:gap-10 xl:gap-16">
 					<div className="w-full md:w-[62%] lg:w-[58%] xl:w-[55%]">
-						<div className="font-mono text-[15px] text-green tracking-[0.05em] mb-6">
+						<div className="font-mono text-[14px] lg:text-[15px] text-green tracking-[0.05em] mb-4">
 							India's first intelligent payment recovery platform
 						</div>
-						<h1 className="font-heading font-black text-[32px] sm:text-[40px] md:text-[48px] lg:text-[54px] xl:text-[68px] 2xl:text-[82px] text-white leading-[1.08] sm:leading-[1.05] md:leading-[1.02] tracking-[-0.03em] opacity-85">
+						<h1 className="font-heading font-black text-[32px] md:text-[42px] lg:text-[48px] xl:text-[54px] 2xl:text-[72px] text-white leading-[1.05] sm:leading-[1.02] tracking-[-0.03em] opacity-85">
 							Your Payment
 							<br />
 							failures are
@@ -417,13 +417,13 @@ function Hero() {
 								></div>
 							</span>
 						</h1>
-						<p className="font-body text-[16px] text-silver max-w-[480px] leading-[1.7] mt-5">
+						<p className="font-body text-[16px] text-silver max-w-[480px] leading-[1.7] mt-4">
 							78% of failed payments can be recovered with the right retry
 							timing and the right message. FynBack does both — automatically,
 							for Razorpay, Stripe, Cashfree, and PayU.
 						</p>
 
-						<div className="mt-8 flex flex-wrap items-center gap-[12px]">
+						<div className="mt-6 flex flex-wrap items-center gap-[12px]">
 							<Link
 								href="/dashboard"
 								className="bg-green text-black font-body font-bold text-[16px] px-[28px] py-[12px] rounded-[6px] hover:bg-[#00ff88] hover:-translate-y-[1px] transition-all"
@@ -438,14 +438,14 @@ function Hero() {
 							</button>
 						</div>
 
-						<div className="mt-[18px] font-body text-[15px] text-silver opacity-85">
+						<div className="mt-[12px] font-body text-[14px] lg:text-[15px] text-silver opacity-85">
 							No credit card · 14-day trial · Setup in 8 minutes · SOC2
 							compliant
 						</div>
 
-						<div className="mt-8 flex flex-row flex-wrap items-center gap-8 md:gap-10 lg:gap-14">
+						<div className="mt-6 flex flex-row flex-wrap items-center gap-8 md:gap-10 lg:gap-14">
 							<div className="flex flex-col">
-								<div className="font-mono font-black text-[24px] md:text-[32px] xl:text-[38px] text-green">
+								<div className="font-mono font-black text-[24px] md:text-[28px] xl:text-[34px] text-green">
 									₹12.4Cr
 								</div>
 								<div className="font-body text-[12px] md:text-[14px] text-silver leading-tight mt-1">
@@ -456,7 +456,7 @@ function Hero() {
 							</div>
 							<div className="hidden sm:block w-[1px] h-[40px] bg-line"></div>
 							<div className="flex flex-col">
-								<div className="font-mono font-black text-[24px] md:text-[32px] xl:text-[38px] text-green">
+								<div className="font-mono font-black text-[24px] md:text-[28px] xl:text-[34px] text-green">
 									78%
 								</div>
 								<div className="font-body text-[12px] md:text-[14px] text-silver leading-tight mt-1">
@@ -465,7 +465,7 @@ function Hero() {
 							</div>
 							<div className="hidden sm:block w-[1px] h-[40px] bg-line"></div>
 							<div className="flex flex-col">
-								<div className="font-mono font-black text-[24px] md:text-[32px] xl:text-[38px] text-green">
+								<div className="font-mono font-black text-[24px] md:text-[28px] xl:text-[34px] text-green">
 									&lt; 8 min
 								</div>
 								<div className="font-body text-[12px] md:text-[14px] text-silver leading-tight mt-1">
