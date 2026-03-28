@@ -3,6 +3,7 @@
 import { Bell, Search, Download } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { NotificationDropdown } from "./NotificationDropdown";
 
 const breadcrumbMap: Record<string, string> = {
   "/dashboard": "Overview",
@@ -33,10 +34,7 @@ export function DashboardHeader() {
           <kbd className="hidden sm:inline ml-2 px-1.5 py-0.5 rounded bg-rx-overlay text-[10px] font-mono">⌘K</kbd>
         </button>
 
-        <button className="relative p-2 rounded-lg hover:bg-rx-overlay text-rx-text-secondary transition-colors">
-          <Bell size={18} />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rx-red" />
-        </button>
+        <NotificationDropdown />
 
         <Button
           variant="outline"

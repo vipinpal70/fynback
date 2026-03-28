@@ -20,6 +20,7 @@ import postgres from 'postgres';
 import * as merchantSchema from './schema/merchants';
 import * as paymentSchema from './schema/payments';
 import * as campaignSchema from './schema/campaigns';
+import * as notificationSchema from './schema/notifications';
 
 // ── Schema exports ────────────────────────────────────────────────────────────
 
@@ -31,6 +32,9 @@ export * from './schema/payments';
 
 // Campaign (dunning sequence) engine
 export * from './schema/campaigns';
+
+// Notifications system
+export * from './schema/notifications';
 
 // ── Query exports ─────────────────────────────────────────────────────────────
 export * from './queries/onboarding';
@@ -64,6 +68,7 @@ export const createDb = (connectionString: string) => {
     ...merchantSchema,
     ...paymentSchema,
     ...campaignSchema,
+    ...notificationSchema,
   };
 
   const client = postgres(connectionString, {
