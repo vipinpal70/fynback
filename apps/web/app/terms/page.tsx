@@ -1,4 +1,4 @@
-import LegalLayout from "../components/landingPage/LegalLayout";
+import LegalLayout from "@/components/landingPage/LegalLayout";
 
 export const metadata = {
   title: "Terms & Conditions — FynBack",

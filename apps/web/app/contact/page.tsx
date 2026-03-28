@@ -1,5 +1,5 @@
-import HeaderComponent from "../components/landingPage/Header";
-import Footer from "../components/landingPage/Footer";
+import HeaderComponent from "@/components/landingPage/Header";
+import Footer from "@/components/landingPage/Footer";
 import ContactForm from "./_form";
 import Link from "next/link";
 import { Mail, MessageCircle, FileText } from "lucide-react";

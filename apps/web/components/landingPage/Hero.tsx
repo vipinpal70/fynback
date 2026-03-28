@@ -318,7 +318,7 @@ const LiveFeed = () => {
 					<div className="w-3 h-3 rounded-full bg-[#28c840]" />
 				</div>
 				<div className="font-mono text-[14px] text-silver">
-					FynBack.in/dashboard · live
+					FynBack.com/dashboard · live
 				</div>
 				<div className="flex items-center">
 					<div className="loader" />
@@ -398,13 +398,13 @@ const LiveFeed = () => {
 function Hero() {
 	return (
 		<div>
-			<section className="min-h-[100svh] flex items-center px-6 md:px-20 py-4">
-				<div className="w-full max-w-[1440px] mx-auto flex flex-col md:flex-row items-center gap-12 lg:gap-20">
-					<div className="w-full md:w-[50%]">
+			<section className="min-h-[100svh] flex items-center px-6 lg:px-20 py-10 md:py-4">
+				<div className="w-full max-w-[1440px] mx-auto flex flex-col md:flex-row items-center gap-12 lg:gap-16 xl:gap-24">
+					<div className="w-full md:w-[62%] lg:w-[58%] xl:w-[55%]">
 						<div className="font-mono text-[15px] text-green tracking-[0.05em] mb-6">
 							India's first intelligent payment recovery platform
 						</div>
-						<h1 className="font-heading font-black text-[38px] sm:text-[42px] md:text-[62px] lg:text-[78px] text-white leading-[1.05] sm:leading-[1.02] tracking-[-0.03em] opacity-85">
+						<h1 className="font-heading font-black text-[32px] sm:text-[40px] md:text-[48px] lg:text-[54px] xl:text-[68px] 2xl:text-[82px] text-white leading-[1.08] sm:leading-[1.05] md:leading-[1.02] tracking-[-0.03em] opacity-85">
 							Your Payment
 							<br />
 							failures are
@@ -443,32 +443,32 @@ function Hero() {
 							compliant
 						</div>
 
-						<div className="mt-8 flex flex-col md:flex-row md:items-center gap-6 md:gap-10">
+						<div className="mt-8 flex flex-row flex-wrap items-center gap-8 md:gap-10 lg:gap-14">
 							<div className="flex flex-col">
-								<div className="font-mono font-black text-[26px] md:text-[34px] text-green">
+								<div className="font-mono font-black text-[24px] md:text-[32px] xl:text-[38px] text-green">
 									₹12.4Cr
 								</div>
-								<div className="font-body text-[13px] md:text-[15px] text-silver leading-tight mt-1">
+								<div className="font-body text-[12px] md:text-[14px] text-silver leading-tight mt-1">
 									recovered
 									<br />
 									this month
 								</div>
 							</div>
-							<div className="hidden md:block w-[1px] h-[40px] bg-line"></div>
+							<div className="hidden sm:block w-[1px] h-[40px] bg-line"></div>
 							<div className="flex flex-col">
-								<div className="font-mono font-black text-[26px] md:text-[34px] text-green">
+								<div className="font-mono font-black text-[24px] md:text-[32px] xl:text-[38px] text-green">
 									78%
 								</div>
-								<div className="font-body text-[13px] md:text-[15px] text-silver leading-tight mt-1">
+								<div className="font-body text-[12px] md:text-[14px] text-silver leading-tight mt-1">
 									avg rate
 								</div>
 							</div>
-							<div className="hidden md:block w-[1px] h-[40px] bg-line"></div>
+							<div className="hidden sm:block w-[1px] h-[40px] bg-line"></div>
 							<div className="flex flex-col">
-								<div className="font-mono font-black text-[26px] md:text-[34px] text-green">
+								<div className="font-mono font-black text-[24px] md:text-[32px] xl:text-[38px] text-green">
 									&lt; 8 min
 								</div>
-								<div className="font-body text-[13px] md:text-[15px] text-silver leading-tight mt-1">
+								<div className="font-body text-[12px] md:text-[14px] text-silver leading-tight mt-1">
 									setup time
 								</div>
 							</div>
@@ -476,9 +476,11 @@ function Hero() {
 					</div>
 
 					<div
-						className="w-full md:w-[50%] h-full"
+						className="w-full md:w-[38%] lg:w-[42%] xl:w-[45%] h-full flex justify-center"
 					>
-						<LiveFeed />
+						<div className="w-full max-w-[640px]">
+							<LiveFeed />
+						</div>
 					</div>
 				</div>
 			</section>
