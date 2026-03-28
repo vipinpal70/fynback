@@ -707,15 +707,20 @@ export default function CampaignsPage() {
 
   async function handleToggleCampaignsPaused() {
     if (!merchant) return;
+    // Capture the intended value BEFORE any async work or state updates.
+    // Using !m.campaignsPaused inside the setMerchant callback is unreliable:
+    // setStrategyLoading(true) triggers a re-render mid-flight which can cause
+    // the callback to see a stale value and toggle to the wrong state.
+    const next = !merchant.campaignsPaused;
     setStrategyLoading(true);
     try {
       const res = await fetch("/api/dashboard/campaigns/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ campaignsPaused: !merchant.campaignsPaused }),
+        body: JSON.stringify({ campaignsPaused: next }),
       });
       if (res.ok) {
-        setMerchant((m) => m ? { ...m, campaignsPaused: !m.campaignsPaused } : m);
+        setMerchant((m) => m ? { ...m, campaignsPaused: next } : m);
       }
     } finally {
       setStrategyLoading(false);
