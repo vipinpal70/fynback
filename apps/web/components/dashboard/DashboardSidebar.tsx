@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
+import { useClerk } from "@clerk/nextjs";
 import { NavLink } from "@/components/NavLink";
 import {
   LayoutDashboard,
@@ -13,6 +14,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
@@ -43,7 +45,9 @@ interface DashboardSidebarProps {
 
 export function DashboardSidebar({ collapsed, onToggle }: DashboardSidebarProps) {
   const pathname = usePathname() || "";
+  const { signOut } = useClerk();
   const [user, setUser] = useState<UserInfo | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     fetch("/api/user/me")
@@ -53,6 +57,41 @@ export function DashboardSidebar({ collapsed, onToggle }: DashboardSidebarProps)
       })
       .catch(() => {});
   }, []);
+
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      // 1. Bust server-side Redis cache for this user + merchant
+      await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+
+      // 2. Wipe all client-side storage
+      try { localStorage.clear(); } catch {}
+      try { sessionStorage.clear(); } catch {}
+
+      // 3. Clear all Cache API caches (service worker caches)
+      if (typeof caches !== "undefined") {
+        const keys = await caches.keys().catch(() => [] as string[]);
+        await Promise.all(keys.map((k) => caches.delete(k).catch(() => {})));
+      }
+
+      // 4. Clear client-accessible cookies
+      document.cookie.split(";").forEach((c) => {
+        const name = c.split("=")[0].trim();
+        // Overwrite with an expired date across common paths and domains
+        document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+        document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=${window.location.hostname}`;
+      });
+
+      // 5. Clerk signs out (clears httpOnly auth cookies) and redirects
+      await signOut({ redirectUrl: "/" });
+    } catch {
+      // If anything above fails, still attempt Clerk sign-out
+      await signOut({ redirectUrl: "/" }).catch(() => {
+        window.location.href = "/";
+      });
+    }
+  }
 
   const trialBadge =
     user?.plan === "trial" && user.trialDaysLeft !== null
@@ -147,7 +186,7 @@ export function DashboardSidebar({ collapsed, onToggle }: DashboardSidebarProps)
       )}
 
       {/* User section */}
-      <div className={cn("border-t border-border p-3", collapsed && "flex flex-col items-center")}>
+      <div className={cn("border-t border-border p-3", collapsed && "flex flex-col items-center gap-2")}>
         {/* Trial badge */}
         {!collapsed && trialBadge && (
           <div className="mb-2 px-2 py-1 rounded-md bg-rx-amber-dim text-rx-amber text-xs font-body font-medium text-center">
@@ -155,33 +194,60 @@ export function DashboardSidebar({ collapsed, onToggle }: DashboardSidebarProps)
           </div>
         )}
 
-        <div className={cn("flex items-center gap-3", collapsed && "flex-col")}>
-          {/* Avatar */}
-          {user ? (
-            <div className="w-8 h-8 rounded-lg bg-rx-blue-dim text-rx-blue flex items-center justify-center font-heading font-bold text-xs flex-shrink-0">
-              {user.initials || "?"}
-            </div>
-          ) : (
-            <div className="w-8 h-8 rounded-lg bg-rx-overlay animate-[skeleton-pulse_2s_ease-in-out_infinite] flex-shrink-0" />
-          )}
+        <div className={cn("flex items-center gap-3", collapsed ? "flex-col" : "justify-between")}>
+          <div className={cn("flex items-center gap-3 min-w-0", collapsed && "flex-col")}>
+            {/* Avatar */}
+            {user ? (
+              <div className="w-8 h-8 rounded-lg bg-rx-blue-dim text-rx-blue flex items-center justify-center font-heading font-bold text-xs flex-shrink-0">
+                {user.initials || "?"}
+              </div>
+            ) : (
+              <div className="w-8 h-8 rounded-lg bg-rx-overlay animate-[skeleton-pulse_2s_ease-in-out_infinite] flex-shrink-0" />
+            )}
 
-          {/* Name + role */}
-          {!collapsed && (
-            <div className="min-w-0">
-              {user ? (
-                <>
-                  <p className="text-sm font-heading font-semibold text-rx-text-primary truncate">
-                    {user.fullName}
-                  </p>
-                  <p className="text-xs font-body text-rx-text-muted capitalize">{user.role}</p>
-                </>
-              ) : (
-                <>
-                  <div className="h-3.5 w-24 bg-rx-overlay rounded animate-[skeleton-pulse_2s_ease-in-out_infinite] mb-1" />
-                  <div className="h-3 w-14 bg-rx-overlay rounded animate-[skeleton-pulse_2s_ease-in-out_infinite]" />
-                </>
-              )}
-            </div>
+            {/* Name + role */}
+            {!collapsed && (
+              <div className="min-w-0">
+                {user ? (
+                  <>
+                    <p className="text-sm font-heading font-semibold text-rx-text-primary truncate">
+                      {user.fullName}
+                    </p>
+                    <p className="text-xs font-body text-rx-text-muted capitalize">{user.role}</p>
+                  </>
+                ) : (
+                  <>
+                    <div className="h-3.5 w-24 bg-rx-overlay rounded animate-[skeleton-pulse_2s_ease-in-out_infinite] mb-1" />
+                    <div className="h-3 w-14 bg-rx-overlay rounded animate-[skeleton-pulse_2s_ease-in-out_infinite]" />
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Logout button */}
+          {collapsed ? (
+            <Tooltip>
+              <TooltipTrigger render={<span />}>
+                <button
+                  onClick={handleLogout}
+                  disabled={loggingOut}
+                  className="p-2 rounded-lg hover:bg-red-500/10 text-rx-text-muted hover:text-red-400 transition-colors disabled:opacity-40"
+                >
+                  <LogOut size={15} className={loggingOut ? "animate-pulse" : ""} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">Sign out</TooltipContent>
+            </Tooltip>
+          ) : (
+            <button
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="flex-shrink-0 p-2 rounded-lg hover:bg-red-500/10 text-rx-text-muted hover:text-red-400 transition-colors disabled:opacity-40"
+              title="Sign out"
+            >
+              <LogOut size={15} className={loggingOut ? "animate-pulse" : ""} />
+            </button>
           )}
         </div>
       </div>
