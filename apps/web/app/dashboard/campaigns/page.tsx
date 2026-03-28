@@ -17,6 +17,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   Zap, Pause, Play, X, Plus, Bell,
   Loader2, AlertTriangle, Sparkles, Calendar, RefreshCw,
@@ -910,6 +911,7 @@ function CampaignRunsTab({
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function CampaignsPage() {
+  const router = useRouter();
   const [runs, setRuns] = useState<CampaignRun[]>([]);
   const [templates, setTemplates] = useState<CampaignTemplate[]>([]);
   const [paydayAlerts, setPaydayAlerts] = useState<PaydayAlert[]>([]);
@@ -1117,7 +1119,8 @@ export default function CampaignsPage() {
           onCreated={(t) => {
             setTemplates((prev) => [...prev, t as unknown as CampaignTemplate]);
             setShowNewModal(false);
-            setActiveTab("templates");
+            // Go straight to the editor so merchant can add steps immediately
+            router.push(`/dashboard/campaigns/${t.id}`);
           }}
         />
       )}
