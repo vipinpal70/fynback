@@ -69,10 +69,6 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
     }
 
     return res
-}, {
-    // Tell the server-side Clerk SDK to route auth requests through your proxy.
-    // Must match NEXT_PUBLIC_CLERK_PROXY_URL in .env
-    proxyUrl: process.env.NEXT_PUBLIC_CLERK_PROXY_URL,
 })
 
 export const config = {
