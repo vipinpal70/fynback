@@ -17,7 +17,7 @@
  * from the authenticated Clerk session server-side.
  */
 
-import { cacheGetOrSet } from './cache/redis';
+import { getRedis } from './cache/redis';
 import { createDb, users, memberships, eq } from '@fynback/db';
 
 function getDb() {
@@ -37,23 +37,42 @@ function getDb() {
 export async function getMerchantIdFromClerkUserId(
   clerkUserId: string
 ): Promise<string | null> {
-  return cacheGetOrSet(
-    `user:${clerkUserId}:merchant`,
-    30 * 60, // 30 minutes
-    async () => {
-      const db = getDb();
+  const key = `user:${clerkUserId}:merchant`;
 
-      // Join users → memberships to get merchantId in one query
-      // WHY LEFT JOIN: We must return null (not throw) if the user hasn't completed
-      // onboarding yet and doesn't have a membership record.
-      const rows = await db
-        .select({ merchantId: memberships.merchantId })
-        .from(users)
-        .innerJoin(memberships, eq(memberships.userId, users.id))
-        .where(eq(users.clerkUserId, clerkUserId))
-        .limit(1);
-
-      return rows[0]?.merchantId ?? null;
+  // Try Redis first — but only trust a cached hit if it's a real UUID, not null.
+  // WHY NOT CACHE NULL: If the user's merchant record doesn't exist yet (mid-onboarding)
+  // or there's a transient DB error, we'd cache null for 30 min and every subsequent
+  // API request would return 404 until the TTL expires. Null results must always
+  // re-query the DB so the merchant appears as soon as onboarding completes.
+  try {
+    const redis = getRedis();
+    const cached = await redis.get(key);
+    if (cached !== null && cached !== 'null') {
+      return JSON.parse(cached) as string;
     }
-  );
+  } catch {
+    // Redis unavailable — fall through to DB query
+  }
+
+  const db = getDb();
+  const rows = await db
+    .select({ merchantId: memberships.merchantId })
+    .from(users)
+    .innerJoin(memberships, eq(memberships.userId, users.id))
+    .where(eq(users.clerkUserId, clerkUserId))
+    .limit(1);
+
+  const merchantId = rows[0]?.merchantId ?? null;
+
+  // Only cache a real merchantId — never cache null
+  if (merchantId !== null) {
+    try {
+      const redis = getRedis();
+      await redis.setex(key, 30 * 60, JSON.stringify(merchantId));
+    } catch {
+      // Ignore — will re-derive on next request
+    }
+  }
+
+  return merchantId;
 }

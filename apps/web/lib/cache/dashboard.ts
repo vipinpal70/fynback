@@ -18,7 +18,7 @@
  * Format: "{resource}:{merchantId}" — consistent pattern for bulk invalidation.
  */
 
-import { cacheGetOrSet } from './redis';
+import { cacheGetOrSet, getRedis } from './redis';
 import { createDb, paymentQueries } from '@fynback/db';
 import type { Database } from '@fynback/db';
 
@@ -130,30 +130,54 @@ export async function getRecentPayments(
   merchantId: string,
   limit: number = 10
 ): Promise<RecentPayment[]> {
-  return cacheGetOrSet(
-    `payments:${merchantId}:recent:${limit}`,
-    2 * 60, // 2 minutes
-    async () => {
-      const db = getDb();
-      const rows = await paymentQueries.getRecentFailedPayments(db, merchantId, limit);
+  const key = `payments:${merchantId}:recent:${limit}`;
 
-      // Convert Date objects to ISO strings (required for JSON serialization)
-      return rows.map((r) => ({
-        id: r.id,
-        customerEmail: r.customerEmail ?? null,
-        customerPhone: r.customerPhone ?? null,
-        customerName: r.customerName ?? null,
-        amountPaise: r.amountPaise,
-        currency: r.currency,
-        gatewayName: r.gatewayName,
-        declineCategory: r.declineCategory,
-        declineCode: r.declineCode ?? null,
-        status: r.status,
-        isRecoverable: r.isRecoverable,
-        failedAt: r.failedAt.toISOString(),
-      }));
+  // Try cache — but only serve a cached result if it is non-empty.
+  // WHY: An empty array can be legitimately cached right after merchant onboarding
+  // (before any webhooks arrive). If the cache is stale-empty, the merchant sees
+  // "No failed payments yet" even though payments came in since the cache was written.
+  // Non-empty results are safe to cache — they degrade gracefully (slightly stale list).
+  try {
+    const redis = getRedis();
+    const cached = await redis.get(key);
+    if (cached !== null) {
+      const parsed = JSON.parse(cached) as RecentPayment[];
+      if (parsed.length > 0) return parsed;
+      // Empty cached result — fall through to re-query DB
     }
-  );
+  } catch {
+    // Redis unavailable — fall through to DB
+  }
+
+  const db = getDb();
+  const rows = await paymentQueries.getRecentFailedPayments(db, merchantId, limit);
+
+  const result: RecentPayment[] = rows.map((r) => ({
+    id: r.id,
+    customerEmail: r.customerEmail ?? null,
+    customerPhone: r.customerPhone ?? null,
+    customerName: r.customerName ?? null,
+    amountPaise: r.amountPaise,
+    currency: r.currency,
+    gatewayName: r.gatewayName,
+    declineCategory: r.declineCategory,
+    declineCode: r.declineCode ?? null,
+    status: r.status,
+    isRecoverable: r.isRecoverable,
+    failedAt: r.failedAt.toISOString(),
+  }));
+
+  // Only cache non-empty results — don't persist an empty array into Redis
+  if (result.length > 0) {
+    try {
+      const redis = getRedis();
+      await redis.setex(key, 2 * 60, JSON.stringify(result));
+    } catch {
+      // Ignore — data is still returned to caller
+    }
+  }
+
+  return result;
 }
 
 /**

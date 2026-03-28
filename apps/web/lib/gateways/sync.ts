@@ -111,6 +111,7 @@ export async function syncGatewayHistory(
     cacheDelete(`kpis:${merchantId}`),
     cacheDelete(`payments:${merchantId}:recent:6`),
     cacheDelete(`payments:${merchantId}:recent:10`),
+    cacheDelete(`payments:${merchantId}:recent:50`),
     cacheDelete(`analytics:${merchantId}:7d`),
     cacheDelete(`analytics:${merchantId}:30d`),
     cacheDelete(`analytics:${merchantId}:90d`),

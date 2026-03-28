@@ -27,6 +27,7 @@
 import { NextResponse } from 'next/server';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { createDb, gatewayConnections, failedPayments, recoveryJobs, eq, and, isNull } from '@fynback/db';
+import { cacheDelete } from '@/lib/cache/redis';
 import { recoveryQueue } from '@fynback/queue';
 import type { SendEmailJobData, RetryPaymentJobData, SendWhatsAppJobData } from '@fynback/queue';
 import { decrypt } from '@/lib/crypto';
@@ -358,6 +359,15 @@ export async function POST(request: Request) {
     // Duplicate webhook delivery — already processed
     return NextResponse.json({ received: true, event, action: 'duplicate' });
   }
+
+  // Bust the payments + KPI dashboard cache so the new failure appears immediately
+  // (don't await — cache invalidation is best-effort; it must not block the webhook response)
+  Promise.allSettled([
+    cacheDelete(`payments:${merchantId}:recent:6`),
+    cacheDelete(`payments:${merchantId}:recent:10`),
+    cacheDelete(`payments:${merchantId}:recent:50`),
+    cacheDelete(`kpis:${merchantId}`),
+  ]).catch(() => {});
 
   // ── Dispatch recovery job ───────────────────────────────────────────────────
   const contactChannel = getContactChannel(normalized.customerEmail, normalized.customerPhone);
