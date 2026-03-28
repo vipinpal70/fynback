@@ -144,6 +144,8 @@ export async function PATCH(req: NextRequest) {
       digestFrequency,
       companyName,
       websiteUrl,
+      logoUrl,
+      companyTagline,
     } = body;
 
     const db = createDb(process.env.DATABASE_URL!);
@@ -165,6 +167,8 @@ export async function PATCH(req: NextRequest) {
     if (defaultCampaignPreference !== undefined) brandUpdate.defaultCampaignPreference = defaultCampaignPreference;
     if (whatsappEnabled !== undefined) brandUpdate.whatsappEnabled = whatsappEnabled;
     if (digestFrequency !== undefined) brandUpdate.digestFrequency = digestFrequency;
+    if (logoUrl !== undefined) brandUpdate.logoUrl = logoUrl || null;
+    if (companyTagline !== undefined) brandUpdate.companyTagline = companyTagline || null;
     // Encrypt slack URL only if a new non-empty value was provided
     if (slackWebhookUrl !== undefined) {
       brandUpdate.slackWebhookUrl = slackWebhookUrl ? encrypt(slackWebhookUrl) : '';

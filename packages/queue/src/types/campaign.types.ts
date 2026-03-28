@@ -156,6 +156,8 @@ export interface ExecuteCampaignStepJobData {
   merchantBrandColor: string;
   merchantCompanyName: string;
   merchantCheckoutUrl: string;   // The payment link sent to the customer
+  merchantLogoUrl?: string;       // Brand logo shown in email header
+  merchantCompanyTagline?: string; // Value hook shown above email body (e.g. "Your winter collection awaits")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

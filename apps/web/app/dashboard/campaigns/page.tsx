@@ -331,19 +331,39 @@ function substituteVars(text: string, companyName: string): string {
   return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`);
 }
 
+interface BrandData {
+  fromName: string | null;
+  fromEmail: string | null;
+  brandColorHex: string;
+  logoUrl: string | null;
+  companyTagline: string | null;
+}
+
 function TemplateEmailsPanel({ companyName }: { companyName: string }) {
   const [steps, setSteps] = useState<EmailStepData[]>([]);
   const [activeStep, setActiveStep] = useState(0);
   const [isOverride, setIsOverride] = useState(false);
   const [loadingEmails, setLoadingEmails] = useState(true);
+  const [brand, setBrand] = useState<BrandData>({ fromName: null, fromEmail: null, brandColorHex: '#3b82f6', logoUrl: null, companyTagline: null });
 
   useEffect(() => {
-    fetch("/api/settings/merchant/email-templates")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.steps) {
-          setSteps(data.steps);
-          setIsOverride(data.isOverride ?? false);
+    Promise.all([
+      fetch("/api/settings/merchant/email-templates").then((r) => r.json()),
+      fetch("/api/settings/merchant").then((r) => r.json()),
+    ])
+      .then(([emailData, settingsData]) => {
+        if (emailData.steps) {
+          setSteps(emailData.steps);
+          setIsOverride(emailData.isOverride ?? false);
+        }
+        if (settingsData.brand) {
+          setBrand({
+            fromName: settingsData.brand.fromName ?? null,
+            fromEmail: settingsData.brand.fromEmail ?? null,
+            brandColorHex: settingsData.brand.brandColorHex ?? '#3b82f6',
+            logoUrl: settingsData.brand.logoUrl ?? null,
+            companyTagline: settingsData.brand.companyTagline ?? null,
+          });
         }
       })
       .catch(() => {})
@@ -370,13 +390,26 @@ function TemplateEmailsPanel({ companyName }: { companyName: string }) {
 
   const currentStep = steps[activeStep] ?? steps[0];
   const emailMsg = currentStep?.messages?.email;
+  const brandColor = brand.brandColorHex || '#3b82f6';
+  const initial = (companyName || brand.fromName || 'A')[0]?.toUpperCase() ?? 'A';
+
+  // Preview variable substitution
+  const vars: Record<string, string> = {
+    customer_name: 'Priya',
+    amount: '₹2,499',
+    merchant_name: companyName || brand.fromName || 'Your Company',
+    payment_link: '#',
+    product_name: companyName || 'your subscription',
+    brand_color: brandColor,
+    value_hook: brand.companyTagline ?? '',
+  };
 
   return (
     <div className="mt-4 pt-4 border-t border-border space-y-3">
       {/* Header row */}
       <div className="flex items-center justify-between">
         <span className={cn("text-[11px] font-medium text-rx-text-secondary", dmSans.className)}>
-          Email messages
+          Email preview
           {isOverride ? (
             <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-md bg-rx-blue/10 text-rx-blue">Customized</span>
           ) : (
@@ -410,22 +443,42 @@ function TemplateEmailsPanel({ companyName }: { companyName: string }) {
         ))}
       </div>
 
-      {/* Email content */}
+      {/* Branded email preview */}
       {emailMsg ? (
-        <div className="rounded-lg bg-rx-bg border border-border overflow-hidden">
-          {/* Subject */}
-          <div className="px-3 py-2 border-b border-border bg-rx-overlay">
-            <span className={cn("text-[10px] text-rx-text-muted", dmSans.className)}>Subject: </span>
-            <span className={cn("text-[11px] text-rx-text-primary font-medium", dmSans.className)}>
-              {substituteVars(emailMsg.subject ?? "", companyName)}
-            </span>
+        <div className="rounded-lg overflow-hidden border border-border" style={{ fontFamily: 'sans-serif' }}>
+          {/* Brand header */}
+          <div className="px-4 py-3 flex items-center gap-3" style={{ background: brandColor }}>
+            {brand.logoUrl ? (
+              <img src={brand.logoUrl} alt={companyName} style={{ maxHeight: 30, maxWidth: 140, objectFit: 'contain', display: 'block' }} />
+            ) : (
+              <>
+                <div className="w-7 h-7 rounded bg-white/20 flex items-center justify-center text-white font-bold text-[12px]">{initial}</div>
+                <span className="text-white font-semibold text-[13px]">{companyName || brand.fromName}</span>
+              </>
+            )}
           </div>
           {/* Body */}
-          <div className={cn(
-            "px-3 py-3 text-[11px] text-rx-text-secondary whitespace-pre-wrap leading-relaxed max-h-44 overflow-y-auto",
-            dmSans.className
-          )}>
-            {substituteVars(emailMsg.bodyText ?? "", companyName)}
+          <div className="bg-white px-5 py-4">
+            <p className="text-[11px] text-[#888] mb-2">Hi Priya,</p>
+            {/* Value hook */}
+            {brand.companyTagline && (
+              <div className="mb-3 pl-3 py-2 text-[11px] text-[#374151] font-semibold border-l-4 rounded-r-md" style={{ borderColor: brandColor, background: '#f8f9fa' }}>
+                {substituteVars(brand.companyTagline, companyName)}
+              </div>
+            )}
+            {/* Subject as title */}
+            <p className="text-[12px] font-semibold text-[#111] mb-2">{substituteVars(emailMsg.subject ?? '', companyName)}</p>
+            {/* Body */}
+            <div className="text-[11px] text-[#444] leading-relaxed whitespace-pre-wrap max-h-32 overflow-y-auto mb-3">
+              {substituteVars(emailMsg.bodyText ?? '', companyName)}
+            </div>
+            <span className="inline-block px-4 py-1.5 rounded-md text-white text-[11px] font-semibold" style={{ background: brandColor }}>
+              Complete your payment →
+            </span>
+          </div>
+          {/* Footer */}
+          <div className="bg-[#f9fafb] px-5 py-2 border-t border-[#e5e7eb]">
+            <p className="text-[10px] text-[#9ca3af]">{companyName} · {brand.fromEmail}</p>
           </div>
         </div>
       ) : (

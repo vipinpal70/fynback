@@ -309,6 +309,8 @@ async function handleScheduleCampaign(
   const merchantBrandColor = brand?.brandColorHex ?? '#3b82f6';
   const merchantCompanyName = merchant?.companyName ?? 'Our service';
   const merchantCheckoutUrl = merchant?.websiteUrl ?? '#';
+  const merchantLogoUrl = brand?.logoUrl ?? undefined;
+  const merchantCompanyTagline = brand?.companyTagline ?? undefined;
 
   // ── 6. Create campaign run ──────────────────────────────────────────────
   const run = await campaignQueries.createCampaignRun(db, {
@@ -379,6 +381,8 @@ async function handleScheduleCampaign(
         merchantBrandColor,
         merchantCompanyName,
         merchantCheckoutUrl,
+        merchantLogoUrl,
+        merchantCompanyTagline,
       } satisfies ExecuteCampaignStepJobData,
       { delay: delayMs, priority: 2 }
     );
@@ -460,11 +464,27 @@ async function handleExecuteStep(
     payment_link: data.merchantCheckoutUrl,
     product_name: data.merchantCompanyName,
     brand_color: data.merchantBrandColor,
+    value_hook: data.merchantCompanyTagline ?? '',
   };
 
-  const bodyHtml = substitute(msgTemplate.bodyHtml ?? '', vars);
   const bodyText = substitute(msgTemplate.bodyText ?? '', vars);
   const subject = substitute(msgTemplate.subject ?? '', vars);
+
+  // Build fully branded HTML email — always use merchant branding shell.
+  // If the message_template already stores custom bodyHtml, use it inside the shell;
+  // otherwise render the plain bodyText as the email body.
+  const rawBodyHtml = msgTemplate.bodyHtml ? substitute(msgTemplate.bodyHtml, vars) : null;
+  const bodyHtml = buildMerchantDunningEmail({
+    companyName: data.merchantCompanyName,
+    logoUrl: data.merchantLogoUrl,
+    brandColor: data.merchantBrandColor,
+    companyTagline: data.merchantCompanyTagline,
+    customerName: vars.customer_name,
+    bodyHtmlContent: rawBodyHtml,
+    bodyText,
+    paymentLink: data.merchantCheckoutUrl,
+    amount: vars.amount,
+  });
 
   // ── Send via the appropriate channel ───────────────────────────────────
   let providerMessageId: string | undefined;
@@ -915,8 +935,121 @@ function substitute(template: string, vars: Record<string, string>): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Email HTML builders (merchant notifications)
+// Email HTML builders
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Builds a fully branded dunning email for the customer.
+ *
+ * WHY A SHARED BUILDER:
+ * Each merchant has a different logo, brand color, and value hook (companyTagline).
+ * The message_templates table stores the copywriting (subject + bodyText), but the
+ * visual shell — logo, CTA button color, value hook block, footer — must be assembled
+ * at send time using the merchant's brand settings fetched during campaign scheduling.
+ *
+ * STRUCTURE:
+ *   ┌──────────────────────────────────────┐
+ *   │  [Logo or Company Name]  brand color  │  ← brand header
+ *   ├──────────────────────────────────────┤
+ *   │  Hi {customer_name},                 │
+ *   │  ┌─────────────────────────────────┐ │
+ *   │  │ 💡 {companyTagline / value hook}│ │  ← accent block (if set)
+ *   │  └─────────────────────────────────┘ │
+ *   │  {email body text}                   │
+ *   │  [Complete your payment →]           │  ← brand-colored CTA
+ *   ├──────────────────────────────────────┤
+ *   │  {companyName} · {amount} reminder   │  ← footer
+ *   └──────────────────────────────────────┘
+ */
+function buildMerchantDunningEmail(params: {
+  companyName: string;
+  logoUrl?: string;
+  brandColor: string;
+  companyTagline?: string;
+  customerName: string;
+  bodyHtmlContent: string | null; // pre-substituted custom HTML, if any
+  bodyText: string;               // pre-substituted plain text (always available)
+  paymentLink: string;
+  amount: string;
+}): string {
+  const color = params.brandColor || '#3b82f6';
+
+  // Header: logo image if available, otherwise company name as text
+  const headerContent = params.logoUrl
+    ? `<img src="${params.logoUrl}" alt="${params.companyName}" style="max-height:44px;max-width:200px;object-fit:contain;display:block;">`
+    : `<span style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.3px;">${params.companyName}</span>`;
+
+  // Value hook accent block — only rendered when companyTagline is set
+  const taglineBlock = params.companyTagline
+    ? `<div style="border-left:4px solid ${color};background:#f8f9fa;padding:14px 18px;border-radius:0 8px 8px 0;margin:0 0 24px 0;">
+        <p style="margin:0;font-size:14px;color:#374151;font-weight:600;line-height:1.5;">${params.companyTagline}</p>
+       </div>`
+    : '';
+
+  // Body: prefer custom HTML if the merchant has set it, otherwise convert plain text to paragraphs
+  const bodyContent = params.bodyHtmlContent
+    ? params.bodyHtmlContent
+    : params.bodyText
+        .split('\n\n')
+        .map(p =>
+          `<p style="margin:0 0 16px 0;font-size:15px;color:#444444;line-height:1.7;">${p.replace(/\n/g, '<br>')}</p>`
+        )
+        .join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Payment Update — ${params.companyName}</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f5f7;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+
+        <!-- Brand header -->
+        <tr>
+          <td style="background:${color};padding:22px 32px;">
+            ${headerContent}
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:32px 32px 24px;">
+            <p style="margin:0 0 20px 0;font-size:16px;color:#111827;line-height:1.5;">Hi ${params.customerName},</p>
+            ${taglineBlock}
+            ${bodyContent}
+            <!-- CTA button -->
+            <table cellpadding="0" cellspacing="0" border="0" style="margin-top:28px;">
+              <tr>
+                <td style="border-radius:8px;background:${color};">
+                  <a href="${params.paymentLink}" style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">Complete your payment →</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="padding:16px 32px;background:#f9fafb;border-top:1px solid #e5e7eb;">
+            <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;">
+              ${params.companyName} · Your payment of <strong>${params.amount}</strong> could not be processed.<br>
+              If you believe this is an error, please contact our support team.
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+// ─── Merchant notification email builders ─────────────────────────────────────
 
 function buildRecoveryConfirmationEmail(
   data: CancelCampaignRunJobData,

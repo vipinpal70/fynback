@@ -569,9 +569,10 @@ function substituteVars(text: string, vars: Record<string, string>): string {
   return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`);
 }
 
-function EmailPreview({ fromName, fromEmail, brandColor, subject, bodyText, companyName }: {
+function EmailPreview({ fromName, fromEmail, brandColor, subject, bodyText, companyName, logoUrl, companyTagline }: {
   fromName: string; fromEmail: string; brandColor: string;
   subject: string; bodyText: string; companyName: string;
+  logoUrl?: string | null; companyTagline?: string | null;
 }) {
   const vars = {
     customer_name: 'Priya',
@@ -580,6 +581,7 @@ function EmailPreview({ fromName, fromEmail, brandColor, subject, bodyText, comp
     payment_link: '#',
     product_name: companyName || 'your subscription',
     brand_color: brandColor,
+    value_hook: companyTagline || '',
   };
   const subjectDisplay = substituteVars(subject, vars);
   const bodyDisplay = substituteVars(bodyText, vars);
@@ -587,22 +589,36 @@ function EmailPreview({ fromName, fromEmail, brandColor, subject, bodyText, comp
 
   return (
     <div className="border border-border rounded-lg overflow-hidden text-[13px]" style={{ fontFamily: 'sans-serif' }}>
+      {/* Brand header */}
       <div className="px-5 py-3 flex items-center gap-3" style={{ background: brandColor }}>
-        <div className="w-8 h-8 rounded bg-white/20 flex items-center justify-center text-white font-bold text-[14px]">{initial}</div>
-        <span className="text-white font-semibold">{companyName || fromName}</span>
+        {logoUrl ? (
+          <img src={logoUrl} alt={companyName} style={{ maxHeight: 36, maxWidth: 160, objectFit: 'contain', display: 'block' }} />
+        ) : (
+          <>
+            <div className="w-8 h-8 rounded bg-white/20 flex items-center justify-center text-white font-bold text-[14px]">{initial}</div>
+            <span className="text-white font-semibold">{companyName || fromName}</span>
+          </>
+        )}
       </div>
       <div className="bg-white px-6 py-5 text-[#1a1a1a]">
+        <p className="text-[12px] text-[#888] mb-1">Hi Priya,</p>
+        {/* Value hook accent block */}
+        {companyTagline && (
+          <div className="mb-4 pl-3 py-2 text-[12px] text-[#374151] font-semibold border-l-4" style={{ borderColor: brandColor, background: '#f8f9fa', borderRadius: '0 6px 6px 0' }}>
+            {substituteVars(companyTagline, vars)}
+          </div>
+        )}
         <p className="font-semibold mb-3 text-[#1a1a1a]">{subjectDisplay}</p>
         <div className="text-[#444] mb-4 text-[13px] leading-relaxed whitespace-pre-line">{bodyDisplay}</div>
         <div className="mb-4">
           <span className="inline-block px-5 py-2 rounded-lg text-white text-[13px] font-semibold" style={{ background: brandColor }}>
-            Update payment method →
+            Complete your payment →
           </span>
         </div>
       </div>
       <div className="bg-[#f4f4f4] px-6 py-3 text-[11px] text-[#888] border-t border-[#e0e0e0]">
-        <p>{fromName} · {fromEmail}</p>
-        <p className="mt-0.5">Unsubscribe</p>
+        <p>{companyName || fromName} · Your payment of ₹2,499 couldn't be processed.</p>
+        <p className="mt-0.5">{fromName} · {fromEmail}</p>
       </div>
     </div>
   );
@@ -621,9 +637,11 @@ interface EmailStep {
 }
 
 function EmailTemplatesCard({
-  fromName, fromEmail, brandColor, companyName, setHasChanges,
+  fromName, fromEmail, brandColor, companyName, logoUrl, companyTagline, setHasChanges,
 }: {
-  fromName: string; fromEmail: string; brandColor: string; companyName: string; setHasChanges: (v: boolean) => void;
+  fromName: string; fromEmail: string; brandColor: string; companyName: string;
+  logoUrl?: string | null; companyTagline?: string | null;
+  setHasChanges: (v: boolean) => void;
 }) {
   const [steps, setSteps] = useState<EmailStep[]>([]);
   const [edits, setEdits] = useState<Record<number, { subject: string; bodyText: string }>>({});
@@ -775,6 +793,8 @@ function EmailTemplatesCard({
               subject={currentEdit.subject || '(no subject)'}
               bodyText={currentEdit.bodyText || '(empty body)'}
               companyName={companyName}
+              logoUrl={logoUrl}
+              companyTagline={companyTagline}
             />
           </div>
         </div>
@@ -786,7 +806,8 @@ function EmailTemplatesCard({
 function BrandSection({ setHasChanges }: { setHasChanges: (v: boolean) => void }) {
   const [fromName, setFromName] = useState(merchantData.brand.fromName);
   const [brandColor, setBrandColor] = useState(merchantData.brand.brandColorHex);
-  const [tagline, setTagline] = useState(merchantData.brand.companyTagline);
+  const [tagline, setTagline] = useState(merchantData.brand.companyTagline ?? '');
+  const [logoUrl, setLogoUrl] = useState(merchantData.brand.logoUrl ?? '');
   const [campaignPref, setCampaignPref] = useState(merchantData.brand.defaultCampaignPreference || 'standard_10d');
   const colorRef = useRef<HTMLInputElement>(null);
 
@@ -846,12 +867,24 @@ function BrandSection({ setHasChanges }: { setHasChanges: (v: boolean) => void }
       <Card>
         <CardTitle>Visual identity</CardTitle>
         <div className="space-y-5">
-          <FormField label="Company logo" helper="Shown in email header. PNG or SVG, max 2MB. Recommended: 320×80px">
-            <div className="border-2 border-dashed border-border rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition-colors hover:border-rx-blue hover:bg-rx-blue-dim/30">
-              <UploadCloud size={28} className="text-rx-text-muted mb-2" />
-              <p className="text-[13px] font-body text-rx-text-muted">Drop your logo here or click to browse</p>
-              <p className="text-[11px] font-body text-rx-text-muted mt-1">PNG, SVG, WebP · Max 2MB</p>
-            </div>
+          <FormField label="Brand logo URL" helper="Shown in email header. Paste a direct image URL (PNG, SVG, WebP). Recommended: 320×80px transparent background.">
+            <Input
+              value={logoUrl}
+              onChange={e => {
+                setLogoUrl(e.target.value);
+                merchantData.brand.logoUrl = e.target.value || null;
+                setHasChanges(true);
+              }}
+              placeholder="https://yoursite.com/logo.png"
+            />
+            {logoUrl && (
+              <div className="mt-2 p-3 rounded-lg border border-border bg-rx-elevated flex items-center gap-3">
+                <div className="rounded p-2 shrink-0" style={{ background: brandColor }}>
+                  <img src={logoUrl} alt="Logo preview" style={{ maxHeight: 32, maxWidth: 120, objectFit: 'contain', display: 'block' }} />
+                </div>
+                <span className="text-[11px] font-body text-rx-text-muted">Preview on brand color background</span>
+              </div>
+            )}
           </FormField>
           <FormField label="Primary brand color" helper="Used for CTA buttons in your recovery emails">
             <div className="flex items-center gap-3">
@@ -864,8 +897,16 @@ function BrandSection({ setHasChanges }: { setHasChanges: (v: boolean) => void }
               <Input value={brandColor} onChange={e => { setBrandColor(e.target.value); merchantData.brand.brandColorHex = e.target.value; setHasChanges(true); }} className="w-32 font-mono" />
             </div>
           </FormField>
-          <FormField label="Email footer tagline (optional)" helper="Shown in small text at the bottom of all recovery emails">
-            <Input value={tagline} onChange={e => { setTagline(e.target.value); setHasChanges(true); }} />
+          <FormField label="Campaign value hook" helper={`Shown as a highlighted accent above the email body — make it specific to your product. e.g. "Your winter collection awaits" / "Don't miss the upcoming blockbuster" / "Your trading strategies are ready"`}>
+            <Input
+              value={tagline}
+              onChange={e => {
+                setTagline(e.target.value);
+                merchantData.brand.companyTagline = e.target.value;
+                setHasChanges(true);
+              }}
+              placeholder={`e.g. Your ${merchantData.companyName || 'product'} subscription is worth keeping active`}
+            />
           </FormField>
         </div>
       </Card>
@@ -875,6 +916,8 @@ function BrandSection({ setHasChanges }: { setHasChanges: (v: boolean) => void }
         fromEmail={merchantData.brand.fromEmail}
         brandColor={brandColor}
         companyName={merchantData.companyName}
+        logoUrl={logoUrl}
+        companyTagline={tagline}
         setHasChanges={setHasChanges}
       />
     </div>
@@ -1781,6 +1824,8 @@ export default function SettingsPage() {
           digestFrequency: merchantData.brand.digestFrequency,
           companyName: merchantData.companyName,
           websiteUrl: merchantData.websiteUrl,
+          logoUrl: merchantData.brand.logoUrl ?? '',
+          companyTagline: merchantData.brand.companyTagline ?? '',
         }),
       });
       if (res.ok) {
