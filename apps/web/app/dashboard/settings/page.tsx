@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   User, Building2, Palette, Link2, MessageCircle, Bell,
-  CreditCard, Users, Key, Shield, AlertTriangle,
+  CreditCard, Users, Shield, AlertTriangle,
   Copy, Check, Eye, EyeOff, Zap, FileText, Unplug,
   Camera, ExternalLink, Plus, UserPlus, UploadCloud,
   ChevronDown, ChevronRight, AlertCircle, Download,
@@ -38,16 +38,6 @@ interface TeamMember {
   role: TeamRole;
   clerkUserId: string | null;
   inviteAcceptedAt: string | null;
-}
-
-interface ApiKey {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  lastUsedAt: string | null;
-  expiresAt: string | null;
-  isActive: boolean;
-  createdAt: string;
 }
 
 // ─── Default Merchant Data (overwritten by real API data on load) ────────────
@@ -115,10 +105,6 @@ const DEFAULT_MERCHANT_DATA = {
     { id: 'tm_002', email: 'priya@acmesaas.in', fullName: 'Priya Sharma', role: 'admin', clerkUserId: 'user_3def456ghi', inviteAcceptedAt: '2024-10-20' },
     { id: 'tm_003', email: 'dev@acmesaas.in', fullName: null, role: 'viewer', clerkUserId: null, inviteAcceptedAt: null },
   ] as TeamMember[],
-  apiKeys: [
-    { id: 'key_001', name: 'Production', keyPrefix: 'rcvx_pr_', lastUsedAt: '2025-03-21T14:01:00Z', expiresAt: null, isActive: true, createdAt: '2024-10-15' },
-    { id: 'key_002', name: 'Staging', keyPrefix: 'rcvx_st_', lastUsedAt: '2025-03-19T09:22:00Z', expiresAt: '2025-06-01', isActive: true, createdAt: '2024-11-02' },
-  ] as ApiKey[],
 };
 
 type MerchantData = typeof DEFAULT_MERCHANT_DATA;
@@ -300,7 +286,6 @@ const navGroups = [
     items: [
       { id: 'billing', label: 'Billing & Plan', icon: CreditCard },
       { id: 'team', label: 'Team', icon: Users },
-      { id: 'apikeys', label: 'API Keys', icon: Key },
       { id: 'security', label: 'Security', icon: Shield },
       { id: 'danger', label: 'Danger Zone', icon: AlertTriangle },
     ],
@@ -315,7 +300,6 @@ function SettingsNav({ activeSection, onNavigate }: { activeSection: string; onN
     if (id === 'whatsapp' && merchantData.brand.whatsappEnabled) return <span className="ml-auto w-2 h-2 rounded-full bg-rx-green shrink-0" />;
     if (id === 'billing') return <Badge variant="green" className="ml-auto text-[10px] py-0">Growth</Badge>;
     if (id === 'team') return <span className="ml-auto text-[11px] font-body bg-rx-overlay px-1.5 py-0.5 rounded-md text-rx-text-muted">{merchantData.team.length}</span>;
-    if (id === 'apikeys') return <span className="ml-auto text-[11px] font-body bg-rx-overlay px-1.5 py-0.5 rounded-md text-rx-text-muted">{merchantData.apiKeys.length}</span>;
     return null;
   };
 
@@ -1486,130 +1470,6 @@ function TeamSection() {
   );
 }
 
-// ─── API Keys Section ─────────────────────────────────────────────────────────
-function ApiKeysSection() {
-  const [showGenerate, setShowGenerate] = useState(false);
-  const [generatedKey, setGeneratedKey] = useState<string | null>(null);
-  const [newKeyName, setNewKeyName] = useState('');
-
-  const generate = () => {
-    const key = `rcvx_pr_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
-    setGeneratedKey(key);
-    setShowGenerate(false);
-  };
-
-  const codeSample = `// Install
-npm install @fynback/node
-
-// Initialize
-import fynback from '@fynback/node';
-const rcvx = new fynback('rcvx_pr_••••••••••');
-
-// Get all active failures
-const failures = await rcvx.payments.list({ status: 'active' });
-
-// Manually trigger retry
-await rcvx.payments.retry('fp_001');
-
-// Get analytics
-const stats = await rcvx.analytics.summary({ period: '30d' });`;
-
-  return (
-    <div className="space-y-5">
-      <SectionHeader
-        title="API Keys"
-        subtitle="Use these keys to access fynback programmatically"
-        action={
-          <button onClick={() => setShowGenerate(v => !v)} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rx-blue text-white text-[13px] font-body font-medium hover:opacity-90 transition-opacity">
-            <Plus size={14} /> Generate new key
-          </button>
-        }
-      />
-
-      <Card>
-        <CardTitle>Active keys</CardTitle>
-
-        {showGenerate && (
-          <div className="flex items-center gap-2 mb-4 p-3 rounded-lg bg-rx-elevated border border-rx-blue/30">
-            <Input placeholder="Key name (e.g. Production)" value={newKeyName} onChange={e => setNewKeyName(e.target.value)} className="flex-1" />
-            <Select className="w-32">
-              <option>Never</option>
-              <option>30 days</option>
-              <option>90 days</option>
-              <option>1 year</option>
-            </Select>
-            <button onClick={generate} className="px-3 py-2.5 rounded-lg bg-rx-blue text-white text-[13px] font-body whitespace-nowrap hover:opacity-90 transition-opacity">Generate</button>
-            <button onClick={() => setShowGenerate(false)} className="p-2.5 rounded-lg border border-border text-rx-text-muted hover:text-rx-text-secondary transition-colors"><X size={14} /></button>
-          </div>
-        )}
-
-        {generatedKey && (
-          <div className="mb-4 p-4 rounded-lg bg-rx-elevated border border-rx-green/30">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[12px] font-body text-rx-amber font-medium">⚠ This key will only be shown once. Copy it now.</p>
-              <X size={14} className="text-rx-text-muted cursor-pointer" onClick={() => setGeneratedKey(null)} />
-            </div>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 font-mono text-[13px] text-rx-green-text break-all">{generatedKey}</code>
-              <CopyButton value={generatedKey} />
-            </div>
-          </div>
-        )}
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr className="border-b border-border text-[11px] font-body text-rx-text-muted">
-                {['Name', 'Key prefix', 'Last used', 'Expires', 'Status', ''].map(h => (
-                  <th key={h} className="text-left px-3 py-2 font-medium">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {merchantData.apiKeys.map(key => {
-                const expiringSoon = key.expiresAt && new Date(key.expiresAt) < new Date(Date.now() + 90 * 864e5);
-                return (
-                  <tr key={key.id} className="border-b border-border last:border-0 hover:bg-rx-overlay/40 transition-colors">
-                    <td className="px-3 py-3 font-body font-medium text-rx-text-primary">{key.name}</td>
-                    <td className="px-3 py-3 font-mono text-rx-text-muted">{maskApiKey(key.keyPrefix)}</td>
-                    <td className="px-3 py-3 font-mono text-rx-text-muted text-[12px]">{key.lastUsedAt ? formatRelativeTime(key.lastUsedAt) : '—'}</td>
-                    <td className="px-3 py-3 font-mono text-[12px]">
-                      <span className={expiringSoon ? 'text-rx-amber' : 'text-rx-text-muted'}>{key.expiresAt ? formatDate(key.expiresAt) : 'Never'}</span>
-                    </td>
-                    <td className="px-3 py-3"><Badge variant="green">Active</Badge></td>
-                    <td className="px-3 py-3">
-                      <button className="p-1.5 rounded hover:bg-rx-overlay text-rx-text-muted transition-colors"><MoreHorizontal size={14} /></button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      <Card>
-        <CardTitle>Quick start</CardTitle>
-        <div className="rounded-xl bg-rx-elevated border border-border overflow-hidden">
-          <pre className="p-4 overflow-x-auto text-[12px] font-mono leading-relaxed">
-            {codeSample.split('\n').map((line, i) => {
-              if (line.startsWith('//')) return <div key={i} className="text-rx-text-muted italic">{line}</div>;
-              if (/^(import|const|await|npm)/.test(line)) return (
-                <div key={i}>
-                  <span className="text-rx-blue">{line.split(' ')[0]}</span>
-                  <span className="text-rx-text-primary"> {line.slice(line.indexOf(' ') + 1)}</span>
-                </div>
-              );
-              return <div key={i} className="text-rx-text-primary">{line}</div>;
-            })}
-          </pre>
-        </div>
-        <a href="#" className="mt-3 block text-[13px] font-body text-rx-blue hover:underline">View full API docs →</a>
-      </Card>
-    </div>
-  );
-}
-
 // ─── Security Section ─────────────────────────────────────────────────────────
 function SecuritySection({ setHasChanges }: { setHasChanges: (v: boolean) => void }) {
   return (
@@ -1950,8 +1810,7 @@ export default function SettingsPage() {
       case 'notifications': return <NotificationsSection key={sectionKey} setHasChanges={setHasChanges} />;
       case 'billing':       return <BillingSection key={sectionKey} />;
       case 'team':          return <TeamSection key={sectionKey} />;
-      case 'apikeys':       return <ApiKeysSection key={sectionKey} />;
-      case 'security':      return <SecuritySection key={sectionKey} setHasChanges={setHasChanges} />;
+case 'security':      return <SecuritySection key={sectionKey} setHasChanges={setHasChanges} />;
       case 'danger':        return <DangerSection key={sectionKey} />;
       default:              return null;
     }
