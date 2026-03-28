@@ -41,9 +41,21 @@ import {
   jsonb,
   uniqueIndex,
   index,
+  customType,
 } from 'drizzle-orm/pg-core';
+
 import { merchants } from './merchants';
 import { failedPayments, outreachEvents } from './payments';
+
+// text[] column type (Drizzle doesn't ship a first-class pg array helper yet)
+const textArray = customType<{ data: string[]; driverData: string }>({
+  dataType() { return 'text[]'; },
+  toDriver(val) { return `{${val.map((v) => `"${v.replace(/"/g, '\\"')}"`).join(',')}}`; },
+  fromDriver(val) {
+    if (!val || val === '{}') return [];
+    return val.replace(/^\{|\}$/g, '').split(',').map((s) => s.replace(/^"|"$/g, '').replace(/\\"/g, '"'));
+  },
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Enums
@@ -329,6 +341,15 @@ export const campaignSteps = pgTable(
     dayOffset: integer('day_offset').notNull(),
 
     preferredChannel: campaignChannelEnum('preferred_channel').notNull(),
+
+    /**
+     * All channels this step should send on (may be more than one).
+     * Example: ['email', 'whatsapp'] — send both on the same day.
+     * The worker creates one BullMQ job per channel with the same delay.
+     * Intersected with channelsActive at run time (skips channels the customer lacks).
+     * Defaults to ['email'] for backward compatibility.
+     */
+    channels: textArray('channels').notNull().default(['email']),
 
     /**
      * Whether this step includes the pause offer section in the message.

@@ -341,61 +341,71 @@ async function handleScheduleCampaign(
   const now = Date.now();
 
   for (const step of steps) {
-    // Resolve channel for this step based on available channels
-    const channel = resolveStepChannel(step.preferredChannel, channelsActive);
-
-    // Find the message template for this step + channel
-    const messages = await campaignQueries.getMessageTemplatesForStep(db, step.id);
-    const msgTemplate = messages.find((m) => m.channel === channel)
-      ?? messages.find((m) => m.channel === 'email')  // fallback to email
-      ?? messages[0];
-
     const delayMs = step.dayOffset * 24 * 60 * 60 * 1000;
     const scheduledAt = new Date(now + delayMs);
 
-    // Enqueue the delayed step job
-    const bullJob = await campaignQueue.add(
-      'execute_campaign_step',
-      {
-        type: 'execute_campaign_step',
-        campaignRunId: run.id,
-        campaignRunStepId: '',   // filled in after DB insert below
-        campaignStepId: step.id,
-        messageTemplateId: msgTemplate?.id ?? '',
-        failedPaymentId: data.failedPaymentId,
-        merchantId: data.merchantId,
-        customerId: data.customerId,
-        stepNumber: step.stepNumber,
-        totalSteps: steps.length,
-        isPauseOffer: step.isPauseOffer,
-        isFinalStep: step.stepNumber === steps.length,
-        channel,
-        customerEmail: data.customerEmail,
-        customerPhone: data.customerPhone,
-        customerName: data.customerName,
-        amountPaise: data.amountPaise,
-        currency: data.currency,
-        merchantFromName,
-        merchantFromEmail,
-        merchantReplyTo,
-        merchantBrandColor,
-        merchantCompanyName,
-        merchantCheckoutUrl,
-        merchantLogoUrl,
-        merchantCompanyTagline,
-      } satisfies ExecuteCampaignStepJobData,
-      { delay: delayMs, priority: 2 }
-    );
+    // Determine which channels to send on for this step.
+    // step.channels is the merchant-configured list (e.g. ['email', 'whatsapp']).
+    // Intersect with channelsActive (what this customer actually has available).
+    const stepChannels = (
+      (step.channels as string[] | null)?.length ? (step.channels as string[]) : [step.preferredChannel]
+    ).filter((ch) => channelsActive.includes(ch as 'email' | 'whatsapp' | 'sms')) as ('email' | 'whatsapp' | 'sms')[];
 
-    runStepInserts.push({
-      campaignRunId: run.id,
-      campaignStepId: step.id,
-      messageTemplateId: msgTemplate?.id,
-      stepNumber: step.stepNumber,
-      channelUsed: channel,
-      scheduledAt,
-      bullmqJobId: bullJob.id ?? undefined,
-    });
+    // If no channels survived the intersection, fall back to email (best-effort)
+    const activeStepChannels = stepChannels.length > 0 ? stepChannels : (['email'] as const);
+
+    // Pre-load all message templates for this step (one DB call, reuse for each channel)
+    const messages = await campaignQueries.getMessageTemplatesForStep(db, step.id);
+
+    // Create one BullMQ job per channel — same delay, independent retries
+    for (const channel of activeStepChannels) {
+      const msgTemplate = messages.find((m) => m.channel === channel)
+        ?? messages.find((m) => m.channel === 'email')  // fallback content
+        ?? messages[0];
+
+      const bullJob = await campaignQueue.add(
+        'execute_campaign_step',
+        {
+          type: 'execute_campaign_step',
+          campaignRunId: run.id,
+          campaignRunStepId: '',   // filled in after DB insert below
+          campaignStepId: step.id,
+          messageTemplateId: msgTemplate?.id ?? '',
+          failedPaymentId: data.failedPaymentId,
+          merchantId: data.merchantId,
+          customerId: data.customerId,
+          stepNumber: step.stepNumber,
+          totalSteps: steps.length,
+          isPauseOffer: step.isPauseOffer,
+          isFinalStep: step.stepNumber === steps.length,
+          channel,
+          customerEmail: data.customerEmail,
+          customerPhone: data.customerPhone,
+          customerName: data.customerName,
+          amountPaise: data.amountPaise,
+          currency: data.currency,
+          merchantFromName,
+          merchantFromEmail,
+          merchantReplyTo,
+          merchantBrandColor,
+          merchantCompanyName,
+          merchantCheckoutUrl,
+          merchantLogoUrl,
+          merchantCompanyTagline,
+        } satisfies ExecuteCampaignStepJobData,
+        { delay: delayMs, priority: 2 }
+      );
+
+      runStepInserts.push({
+        campaignRunId: run.id,
+        campaignStepId: step.id,
+        messageTemplateId: msgTemplate?.id,
+        stepNumber: step.stepNumber,
+        channelUsed: channel,
+        scheduledAt,
+        bullmqJobId: bullJob.id ?? undefined,
+      });
+    }
   }
 
   // ── 8. Persist run steps to DB ─────────────────────────────────────────

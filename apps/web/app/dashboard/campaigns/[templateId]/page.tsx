@@ -47,6 +47,7 @@ interface CampaignStep {
   stepNumber: number;
   dayOffset: number;
   preferredChannel: Channel;
+  channels: Channel[];
   isPauseOffer: boolean;
   messages: MessageTemplate[];
 }
@@ -373,14 +374,16 @@ function StepCard({
             {step.stepNumber}
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className={cn("text-sm font-semibold text-rx-text-primary", plusJakarta.className)}>
                 Day {step.dayOffset}
               </span>
-              <div className={cn("flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md font-medium", channelColor[step.preferredChannel])}>
-                {channelIcon[step.preferredChannel]}
-                {step.preferredChannel}
-              </div>
+              {(step.channels?.length ? step.channels : [step.preferredChannel]).map((ch) => (
+                <div key={ch} className={cn("flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md font-medium", channelColor[ch as Channel])}>
+                  {channelIcon[ch as Channel]}
+                  {ch}
+                </div>
+              ))}
               {step.isPauseOffer && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-rx-amber-dim text-rx-amber">
                   Pause offer
@@ -476,24 +479,45 @@ function StepCard({
 function AddStepModal({
   templateId,
   existingSteps,
+  plan,
   onClose,
   onAdded,
 }: {
   templateId: string;
   existingSteps: CampaignStep[];
+  plan: PlanName;
   onClose: () => void;
   onAdded: (step: CampaignStep) => void;
 }) {
   const nextStepNum = existingSteps.length + 1;
   const lastDayOffset = existingSteps[existingSteps.length - 1]?.dayOffset ?? 0;
 
+  // How many channels this plan can use per step
+  const channelLimit = plan === "scale" ? 3 : plan === "growth" ? 2 : 1;
+  const emailOnly = channelLimit === 1;
+
   const [dayOffset, setDayOffset] = useState(lastDayOffset + 2);
-  const [channel, setChannel] = useState<Channel>("email");
+  // channels is the multi-select state; starter/trial always locked to ['email']
+  const [selectedChannels, setSelectedChannels] = useState<Channel[]>(["email"]);
   const [isPauseOffer, setIsPauseOffer] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  function toggleChannel(ch: Channel) {
+    if (emailOnly) return; // locked for starter/trial
+    setSelectedChannels((prev) => {
+      if (prev.includes(ch)) {
+        // Always keep at least one channel
+        if (prev.length === 1) return prev;
+        return prev.filter((c) => c !== ch);
+      }
+      if (prev.length >= channelLimit) return prev; // cap at plan limit
+      return [...prev, ch];
+    });
+  }
+
   async function handleAdd() {
+    if (selectedChannels.length === 0) { setError("Select at least one channel"); return; }
     setLoading(true);
     setError("");
     try {
@@ -503,13 +527,13 @@ function AddStepModal({
         body: JSON.stringify({
           stepNumber: nextStepNum,
           dayOffset,
-          preferredChannel: channel,
+          channels: selectedChannels,
           isPauseOffer,
         }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Failed to add step"); return; }
-      onAdded({ ...data.step, messages: [] });
+      onAdded({ ...data.step, channels: data.step.channels ?? selectedChannels, messages: [] });
     } catch {
       setError("Network error");
     } finally {
@@ -543,28 +567,56 @@ function AddStepModal({
               className="w-full px-3 py-2 rounded-lg bg-rx-overlay border border-border text-sm text-rx-text-primary focus:outline-none focus:ring-1 focus:ring-rx-blue/40"
             />
           </div>
+
           <div>
-            <label className={cn("block text-xs text-rx-text-muted mb-1.5", dmSans.className)}>
-              Preferred channel
-            </label>
-            <div className="flex gap-2">
-              {(["email", "whatsapp", "sms"] as Channel[]).map((ch) => (
-                <button
-                  key={ch}
-                  onClick={() => setChannel(ch)}
-                  className={cn(
-                    "flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium border transition-colors",
-                    channel === ch
-                      ? "bg-rx-blue/10 border-rx-blue text-rx-blue"
-                      : "border-border text-rx-text-muted hover:border-rx-text-muted/50"
-                  )}
-                >
-                  {channelIcon[ch]}
-                  {ch}
-                </button>
-              ))}
+            <div className="flex items-center justify-between mb-1.5">
+              <label className={cn("text-xs text-rx-text-muted", dmSans.className)}>
+                Channels
+              </label>
+              {emailOnly ? (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-rx-overlay text-rx-text-muted">
+                  Email only · Upgrade to unlock multi-channel
+                </span>
+              ) : (
+                <span className="text-[10px] text-rx-text-muted">
+                  Pick up to {channelLimit}
+                </span>
+              )}
             </div>
+            <div className="flex gap-2">
+              {(["email", "whatsapp", "sms"] as Channel[]).map((ch) => {
+                const isSelected = selectedChannels.includes(ch);
+                const isDisabled = emailOnly && ch !== "email";
+                return (
+                  <button
+                    key={ch}
+                    onClick={() => toggleChannel(ch)}
+                    disabled={isDisabled}
+                    className={cn(
+                      "flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium border transition-colors",
+                      isDisabled
+                        ? "border-border text-rx-text-muted/40 cursor-not-allowed"
+                        : isSelected
+                        ? "bg-rx-blue/10 border-rx-blue text-rx-blue"
+                        : "border-border text-rx-text-muted hover:border-rx-text-muted/50"
+                    )}
+                  >
+                    {channelIcon[ch]}
+                    {ch}
+                    {isSelected && !isDisabled && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-rx-blue" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {selectedChannels.length > 1 && (
+              <p className={cn("text-[10px] text-rx-text-muted mt-1.5", dmSans.className)}>
+                Both messages will send on the same day with the same delay.
+              </p>
+            )}
           </div>
+
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -653,7 +705,7 @@ export default function TemplateEditorPage() {
 
   const timelineSteps: TimelineStep[] = (template?.steps ?? []).map((s) => ({
     day: `Day ${s.dayOffset}`,
-    channels: [s.preferredChannel],
+    channels: s.channels?.length ? s.channels : [s.preferredChannel],
   }));
 
   if (loading) {
@@ -761,6 +813,7 @@ export default function TemplateEditorPage() {
         <AddStepModal
           templateId={templateId}
           existingSteps={template.steps}
+          plan={merchantPlan}
           onClose={() => setShowAddStep(false)}
           onAdded={(step) => {
             setTemplate((prev) => prev ? { ...prev, steps: [...prev.steps, step] } : prev);
