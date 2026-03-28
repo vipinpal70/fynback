@@ -16,18 +16,9 @@ export default function HeaderComponent() {
 			{/* NAVBAR */}
 			<nav className="sticky top-0 z-[1001] h-[60px] bg-[#08090c]/85 backdrop-blur-[8px] border-b border-line px-6 md:px-10 flex items-center justify-between">
 				<Link href="/" className="flex items-center gap-1.5" aria-label="FynBack Home">
-					<svg
-						width="20"
-						height="20"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="var(--green)"
-						strokeWidth="2"
-						strokeLinecap="round"
-						strokeLinejoin="round"
-					>
-						<polyline points="18 15 12 9 6 15"></polyline>
-						<line x1="12" y1="9" x2="12" y2="21"></line>
+					<svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="flex-shrink-0">
+						<path d="M4 18C4 18 8 6 12 6C16 6 20 18 20 18" stroke="hsl(var(--accent-green))" strokeWidth="2.5" strokeLinecap="round" />
+						<path d="M16 10L20 6L16 8" stroke="hsl(var(--accent-green))" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
 					</svg>
 					<span className="font-heading font-semibold text-[20px] text-white tracking-[-0.5px]">
 						FynBack
@@ -51,12 +42,12 @@ export default function HeaderComponent() {
 				</div>
 
 				<div className="hidden md:flex items-center gap-4">
-					<Link href="/dashboard" className="text-silver hover:text-green">
+					<Link href="/sign-in" className="text-silver hover:text-green">
 						Sign in
 					</Link>
 					<span className="text-silver">|</span>
 					<Link
-						href="/dashboard"
+						href="/sign-up"
 						className="text-green bg-[var(--green-dim)] border border-[var(--green-line)] px-4 py-1.5 rounded-[6px]"
 					>
 						Get started free
