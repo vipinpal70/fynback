@@ -34,6 +34,7 @@ import 'dotenv/config';
 import { startWelcomeWorker } from './workers/welcome.worker';
 import { startGatewayWorker } from './workers/gateway.worker';
 import { startRecoveryWorker } from './workers/recovery.worker';
+import { startCampaignWorker } from './workers/campaign.worker';
 
 console.log('[Worker] FynBack Worker process starting...');
 
@@ -48,6 +49,11 @@ const gatewayWorker = startGatewayWorker();
 // Core payment recovery engine — THE HEART OF FYNBACK
 // Processes: retry_payment | send_email | send_whatsapp | send_sms jobs
 const recoveryWorker = startRecoveryWorker();
+
+// Campaign (dunning sequence) engine
+// Processes: validate_customer_channels | schedule_campaign | execute_campaign_step
+//            | cancel_campaign_run | payday_notify
+const { campaign: campaignWorker, payday: paydayWorker } = startCampaignWorker();
 
 console.log('[Worker] All workers started successfully. Listening for jobs...');
 
@@ -69,6 +75,8 @@ process.on('SIGTERM', async () => {
     welcomeWorker.close(),
     gatewayWorker.close(),
     recoveryWorker.close(),
+    campaignWorker.close(),
+    paydayWorker.close(),
   ]);
 
   console.log('[Worker] All workers closed cleanly. Exiting.');
@@ -86,6 +94,8 @@ process.on('SIGINT', async () => {
     welcomeWorker.close(),
     gatewayWorker.close(),
     recoveryWorker.close(),
+    campaignWorker.close(),
+    paydayWorker.close(),
   ]);
 
   process.exit(0);

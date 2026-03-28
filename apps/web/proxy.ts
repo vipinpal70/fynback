@@ -29,9 +29,14 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
             return NextResponse.redirect(new URL('/dashboard', req.url))
         }
 
-        // If they are on a protected route but haven't finished onboarding, send to onboarding
+        // If they are on a protected route but haven't finished onboarding, route through
+        // /api/auth/repair first. That handler does a DB check: if the user already has a
+        // merchant record (returning user who lost their cookie/JWT claim) it sets the
+        // rcvrx_ob cookie and sends them to /dashboard; otherwise it sends them to /onboarding.
+        // This breaks the infinite loop that occurred when proxy→/onboarding and
+        // onboarding/layout→/dashboard kept bouncing a returning user with a stale session.
         if (isProtectedRoute(req) && !onboardingComplete && !isOnboardingRoute(req)) {
-            return NextResponse.redirect(new URL('/onboarding', req.url))
+            return NextResponse.redirect(new URL('/api/auth/repair', req.url))
         }
     }
 

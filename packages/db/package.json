@@ -5,6 +5,11 @@
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "seed": "tsx src/seed/campaigns.seed.ts",
+    "generate": "drizzle-kit generate",
+    "push": "drizzle-kit push"
+  },
   "dependencies": {
     "@fynback/shared": "workspace:*",
     "drizzle-orm": "0.39.3",

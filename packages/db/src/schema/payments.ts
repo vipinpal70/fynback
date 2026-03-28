@@ -382,6 +382,14 @@ export const failedPayments = pgTable(
      */
     rawPayload: jsonb('raw_payload').notNull(),
 
+    /**
+     * Links to the active campaign run for this payment (set by campaign-scheduler).
+     * Stored as nullable UUID text (no FK here to avoid circular schema imports:
+     * campaigns.ts already imports failed_payments from this file).
+     * Use campaign_runs.failed_payment_id for the authoritative join.
+     */
+    activeCampaignRunId: uuid('active_campaign_run_id'),
+
     // Soft delete (deletedAt not used for failed_payments — we keep all for compliance)
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -487,6 +495,13 @@ export const recoveryJobs = pgTable(
      */
     result: jsonb('result'),
 
+    /**
+     * Links this job to its campaign run (set when dispatched by campaign-scheduler).
+     * Nullable: legacy jobs and direct-dispatch jobs won't have a campaign run.
+     * Stored as UUID without FK to avoid circular import (campaigns.ts → payments.ts).
+     */
+    campaignRunId: uuid('campaign_run_id'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
@@ -573,6 +588,14 @@ export const outreachEvents = pgTable(
     failedAt: timestamp('failed_at', { withTimezone: true }),
 
     errorMessage: text('error_message'),
+
+    /**
+     * Links back to the campaign_run_steps row that triggered this outreach.
+     * NULL for legacy outreach created before the campaign engine existed.
+     * Stored as UUID without FK (campaigns.ts imports outreach_events from this file;
+     * adding a FK here would create a circular dependency).
+     */
+    campaignRunStepId: uuid('campaign_run_step_id'),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },

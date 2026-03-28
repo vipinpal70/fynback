@@ -1,0 +1,741 @@
+"use client";
+
+/**
+ * app/dashboard/campaigns/page.tsx — Recovery Campaigns dashboard
+ *
+ * WHY "use client":
+ * Interactive campaign cards with create/edit modal, pause/resume actions,
+ * AI-generate buttons, and real-time pause-offer badges all require client state.
+ *
+ * DATA STRATEGY:
+ * - Campaign runs: /api/dashboard/campaigns?page=...
+ * - Merchant templates: /api/dashboard/campaigns (POST for create)
+ * - Payday alerts: /api/dashboard/campaigns/payday-alerts
+ * - Pause offer action: /api/dashboard/campaigns/runs/[runId]/pause-offer
+ *
+ * PROTOTYPE SOURCE: D:\PRSAAS\web_prototype\app\dashboard\campaigns\page.tsx
+ */
+
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  Zap, Pause, Play, Edit, X, Plus, ChevronRight, Bell,
+  Loader2, AlertTriangle, Sparkles, Calendar, RefreshCw,
+  Mail, MessageSquare, Phone, Check, Settings,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import CampaignTimeline, { type TimelineStep } from "@/components/dashboard/CampaignTimeline";
+import { Plus_Jakarta_Sans, DM_Sans, JetBrains_Mono } from "next/font/google";
+
+const plusJakarta = Plus_Jakarta_Sans({ subsets: ["latin"], weight: ["500", "600", "700"] });
+const dmSans = DM_Sans({ subsets: ["latin"], weight: ["400", "500"] });
+const jetbrains = JetBrains_Mono({ subsets: ["latin"], weight: ["500", "700"] });
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type RunStatus = "active" | "paused" | "recovered" | "cancelled" | "exhausted";
+type PauseOfferStatus = "pending" | "approved" | "rejected" | null;
+type ChannelType = "email" | "whatsapp" | "sms";
+type PlanName = "trial" | "starter" | "growth" | "scale";
+
+interface CampaignStep {
+  id: string;
+  stepNumber: number;
+  dayOffset: number;
+  preferredChannel: ChannelType;
+  isPauseOffer: boolean;
+}
+
+interface CampaignTemplate {
+  id: string;
+  name: string;
+  type: "system_default" | "merchant_master";
+  plan: PlanName;
+  maxSteps: number;
+  isActive: boolean;
+  steps: CampaignStep[];
+}
+
+interface CampaignRun {
+  id: string;
+  status: RunStatus;
+  currentStepIndex: number;
+  pauseOfferSent: boolean;
+  pauseOfferStatus: PauseOfferStatus;
+  completedAt: string | null;
+  createdAt: string;
+  failedPaymentId: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  amountPaise: number;
+  currency: string;
+  templateName: string;
+  templateSteps: CampaignStep[];
+}
+
+interface PaydayAlert {
+  campaignRunId: string;
+  failedPaymentId: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  amountPaise: number;
+  currency: string;
+  exhaustedAt: string | null;
+}
+
+interface MerchantInfo {
+  plan: PlanName;
+  companyName: string;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatAmount(amountPaise: number, currency: string) {
+  const amount = amountPaise / 100;
+  if (currency === "INR") return `₹${amount.toLocaleString("en-IN")}`;
+  return `${currency} ${amount.toFixed(2)}`;
+}
+
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function runToTimelineSteps(run: CampaignRun): TimelineStep[] {
+  return run.templateSteps.map((step) => ({
+    day: `Day ${step.dayOffset}`,
+    channels: [step.preferredChannel],
+  }));
+}
+
+const statusStyle: Record<RunStatus, string> = {
+  active: "bg-rx-blue/10 text-rx-blue",
+  paused: "bg-rx-amber-dim text-rx-amber",
+  recovered: "bg-rx-green-dim text-rx-green",
+  cancelled: "bg-rx-overlay text-rx-text-muted",
+  exhausted: "bg-red-500/10 text-red-400",
+};
+
+const statusLabel: Record<RunStatus, string> = {
+  active: "Active",
+  paused: "Paused",
+  recovered: "Recovered",
+  cancelled: "Cancelled",
+  exhausted: "Exhausted",
+};
+
+const planLimits: Record<PlanName, { maxTemplates: number; canCreate: boolean }> = {
+  trial:   { maxTemplates: 0, canCreate: false },
+  starter: { maxTemplates: 0, canCreate: false },
+  growth:  { maxTemplates: 1, canCreate: true },
+  scale:   { maxTemplates: 5, canCreate: true },
+};
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function PauseOfferBadge({
+  runId,
+  status,
+  onAction,
+}: {
+  runId: string;
+  status: PauseOfferStatus;
+  onAction: (runId: string, action: "approve" | "reject") => void;
+}) {
+  if (!status || status !== "pending") return null;
+  return (
+    <div className="mt-3 flex items-center gap-2 p-2.5 rounded-lg bg-rx-amber-dim border border-rx-amber/20">
+      <Bell size={13} className="text-rx-amber shrink-0" />
+      <span className="text-[11px] font-body text-rx-amber flex-1">Customer requested pause</span>
+      <button
+        onClick={() => onAction(runId, "approve")}
+        className="text-[10px] px-2 py-0.5 rounded bg-rx-green/20 text-rx-green font-semibold hover:bg-rx-green/30 transition-colors"
+      >
+        Approve
+      </button>
+      <button
+        onClick={() => onAction(runId, "reject")}
+        className="text-[10px] px-2 py-0.5 rounded bg-rx-overlay text-rx-text-muted font-semibold hover:bg-rx-overlay/80 transition-colors"
+      >
+        Reject
+      </button>
+    </div>
+  );
+}
+
+function CampaignRunCard({
+  run,
+  onPauseToggle,
+  onPauseOffer,
+}: {
+  run: CampaignRun;
+  onPauseToggle: (runId: string, currentStatus: RunStatus) => void;
+  onPauseOffer: (runId: string, action: "approve" | "reject") => void;
+}) {
+  const timelineSteps = runToTimelineSteps(run);
+  const customerDisplay = run.customerName || run.customerEmail || "Unknown customer";
+  const amount = formatAmount(run.amountPaise, run.currency);
+  const isPaused = run.status === "paused";
+  const isActive = run.status === "active";
+
+  return (
+    <div className="bg-rx-surface border border-border rounded-2xl p-6 card-hover">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 mb-0.5">
+            <h3 className={cn("font-semibold text-rx-text-primary truncate text-sm", plusJakarta.className)}>
+              {customerDisplay}
+            </h3>
+            <span className={cn("text-[10px] px-1.5 py-0.5 rounded-md shrink-0 font-medium", statusStyle[run.status])}>
+              {statusLabel[run.status]}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className={cn("font-semibold text-rx-green-text", jetbrains.className)}>{amount}</span>
+            <span className="text-rx-text-muted">·</span>
+            <span className={cn("text-rx-text-muted", dmSans.className)}>{run.templateName}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 ml-3 shrink-0">
+          {(isActive || isPaused) && (
+            <button
+              onClick={() => onPauseToggle(run.id, run.status)}
+              className="p-1.5 rounded-md hover:bg-rx-overlay text-rx-text-muted transition-colors"
+              title={isPaused ? "Resume campaign" : "Pause campaign"}
+            >
+              {isPaused ? <Play size={13} /> : <Pause size={13} />}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Timeline */}
+      <div className="mb-4 px-1">
+        <CampaignTimeline steps={timelineSteps} currentStep={run.currentStepIndex} />
+      </div>
+
+      {/* Pause offer alert */}
+      {run.pauseOfferSent && run.pauseOfferStatus === "pending" && (
+        <PauseOfferBadge runId={run.id} status={run.pauseOfferStatus} onAction={onPauseOffer} />
+      )}
+
+      {/* Footer */}
+      <div className={cn("flex items-center justify-between pt-3 border-t border-border", run.pauseOfferSent && run.pauseOfferStatus === "pending" ? "mt-3" : "")}>
+        <span className={cn("text-[10px] text-rx-text-muted", dmSans.className)}>
+          Started {timeAgo(run.createdAt)}
+        </span>
+        {run.status === "recovered" && (
+          <span className="flex items-center gap-1 text-[10px] text-rx-green">
+            <Check size={11} strokeWidth={2.5} /> Recovered
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PaydayAlertsBanner({ alerts, onDismiss }: { alerts: PaydayAlert[]; onDismiss: () => void }) {
+  if (alerts.length === 0) return null;
+  return (
+    <div className="flex items-start gap-3 p-4 rounded-xl bg-rx-blue/5 border border-rx-blue/20">
+      <Calendar size={16} className="text-rx-blue mt-0.5 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className={cn("text-sm font-semibold text-rx-text-primary mb-1", plusJakarta.className)}>
+          Payday retry opportunity
+        </p>
+        <p className={cn("text-[12px] text-rx-text-secondary", dmSans.className)}>
+          {alerts.length} exhausted campaign{alerts.length > 1 ? "s" : ""} may convert now —
+          consider reaching out to these customers directly.
+        </p>
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {alerts.slice(0, 3).map((a) => (
+            <span key={a.campaignRunId} className="text-[10px] px-2 py-0.5 rounded-md bg-rx-overlay text-rx-text-secondary font-mono">
+              {a.customerEmail || a.customerName || "Customer"} · {formatAmount(a.amountPaise, a.currency)}
+            </span>
+          ))}
+          {alerts.length > 3 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-md bg-rx-overlay text-rx-text-muted">
+              +{alerts.length - 3} more
+            </span>
+          )}
+        </div>
+      </div>
+      <button onClick={onDismiss} className="p-1 rounded-md hover:bg-rx-overlay text-rx-text-muted transition-colors shrink-0">
+        <X size={13} />
+      </button>
+    </div>
+  );
+}
+
+function NewTemplateModal({
+  onClose,
+  onCreated,
+  plan,
+}: {
+  onClose: () => void;
+  onCreated: (template: CampaignTemplate) => void;
+  plan: PlanName;
+}) {
+  const [name, setName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleCreate() {
+    if (!name.trim()) { setError("Name is required"); return; }
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/dashboard/campaigns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || "Failed to create"); return; }
+      onCreated(data.template);
+    } catch {
+      setError("Network error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-rx-surface border border-border rounded-2xl p-6 w-full max-w-md mx-4 shadow-2xl">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className={cn("text-base font-bold text-rx-text-primary", plusJakarta.className)}>
+            New campaign template
+          </h2>
+          <button onClick={onClose} className="p-1.5 rounded-md hover:bg-rx-overlay text-rx-text-muted transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className={cn("block text-xs font-medium text-rx-text-secondary mb-1.5", dmSans.className)}>
+              Campaign name
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+              placeholder="e.g. Aggressive 7-day sequence"
+              className="w-full px-3 py-2 rounded-lg bg-rx-overlay border border-border text-sm text-rx-text-primary placeholder:text-rx-text-muted focus:outline-none focus:ring-1 focus:ring-rx-blue/50"
+            />
+          </div>
+
+          {plan === "growth" && (
+            <p className={cn("text-[11px] text-rx-text-muted", dmSans.className)}>
+              Growth plan: 1 custom campaign template, up to 5 steps.
+            </p>
+          )}
+          {plan === "scale" && (
+            <p className={cn("text-[11px] text-rx-text-muted", dmSans.className)}>
+              Scale plan: up to 5 custom campaign templates, up to 15 steps each. AI generation enabled.
+            </p>
+          )}
+
+          {error && (
+            <p className="text-[11px] text-red-400 flex items-center gap-1">
+              <AlertTriangle size={11} /> {error}
+            </p>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 mt-6">
+          <button
+            onClick={onClose}
+            className={cn("px-4 py-2 rounded-lg text-sm text-rx-text-muted hover:bg-rx-overlay transition-colors", dmSans.className)}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleCreate}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-rx-blue text-sm font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+            Create
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ plan, onNew }: { plan: PlanName; onNew: () => void }) {
+  const canCreate = planLimits[plan]?.canCreate;
+  return (
+    <div className="flex flex-col items-center justify-center py-20 text-center">
+      <div className="w-12 h-12 rounded-full bg-rx-overlay flex items-center justify-center mb-4">
+        <Zap size={20} className="text-rx-text-muted" />
+      </div>
+      <h3 className={cn("text-base font-semibold text-rx-text-primary mb-2", plusJakarta.className)}>
+        No active campaigns
+      </h3>
+      <p className={cn("text-sm text-rx-text-muted mb-6 max-w-xs", dmSans.className)}>
+        {canCreate
+          ? "Create your first custom campaign template to start recovering failed payments automatically."
+          : "Campaigns run automatically based on the system default sequence for your plan. Upgrade to Growth or Scale to customise."}
+      </p>
+      {canCreate && (
+        <button
+          onClick={onNew}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-rx-blue text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+        >
+          <Plus size={14} /> New campaign
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
+export default function CampaignsPage() {
+  const [runs, setRuns] = useState<CampaignRun[]>([]);
+  const [templates, setTemplates] = useState<CampaignTemplate[]>([]);
+  const [paydayAlerts, setPaydayAlerts] = useState<PaydayAlert[]>([]);
+  const [merchant, setMerchant] = useState<MerchantInfo | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [showNewModal, setShowNewModal] = useState(false);
+  const [showPaydayBanner, setShowPaydayBanner] = useState(true);
+  const [activeTab, setActiveTab] = useState<"runs" | "templates">("runs");
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [runsRes, paydayRes] = await Promise.all([
+        fetch("/api/dashboard/campaigns"),
+        fetch("/api/dashboard/campaigns/payday-alerts"),
+      ]);
+
+      if (runsRes.ok) {
+        const data = await runsRes.json();
+        setRuns(data.runs || []);
+        setTemplates(data.templates || []);
+        setMerchant(data.merchant || null);
+      }
+      if (paydayRes.ok) {
+        const data = await paydayRes.json();
+        setPaydayAlerts(data.alerts || []);
+      }
+    } catch {
+      setError("Failed to load campaigns");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  async function handlePauseToggle(runId: string, currentStatus: RunStatus) {
+    setActionLoading(runId);
+    try {
+      // Toggle pause via the campaign runs endpoint (not yet implemented — placeholder)
+      await fetch(`/api/dashboard/campaigns/runs/${runId}/pause-offer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: currentStatus === "paused" ? "reject" : "approve" }),
+      });
+      await fetchData();
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handlePauseOffer(runId: string, action: "approve" | "reject") {
+    setActionLoading(runId);
+    try {
+      const res = await fetch(`/api/dashboard/campaigns/runs/${runId}/pause-offer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (res.ok) await fetchData();
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  const plan = merchant?.plan ?? "starter";
+  const canCreateTemplate = planLimits[plan]?.canCreate;
+  const pendingPauseOffers = runs.filter(
+    (r) => r.pauseOfferSent && r.pauseOfferStatus === "pending"
+  );
+
+  return (
+    <div className={cn("space-y-6 max-w-[1400px]", dmSans.className)}>
+      {/* Page header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className={cn("text-2xl font-bold text-rx-text-primary", plusJakarta.className)}>
+            Recovery Campaigns
+          </h1>
+          {pendingPauseOffers.length > 0 && (
+            <p className="text-xs text-rx-amber mt-0.5 flex items-center gap-1">
+              <Bell size={11} />
+              {pendingPauseOffers.length} pause offer{pendingPauseOffers.length > 1 ? "s" : ""} awaiting your approval
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={fetchData}
+            className="p-2 rounded-lg hover:bg-rx-overlay text-rx-text-muted transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw size={15} />
+          </button>
+          {canCreateTemplate && (
+            <button
+              onClick={() => setShowNewModal(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-rx-blue text-sm font-semibold text-white btn-glow hover:opacity-90 transition-opacity"
+            >
+              <Zap size={15} /> New campaign
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Payday alerts banner */}
+      {showPaydayBanner && paydayAlerts.length > 0 && (
+        <PaydayAlertsBanner alerts={paydayAlerts} onDismiss={() => setShowPaydayBanner(false)} />
+      )}
+
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-border">
+        {(["runs", "templates"] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={cn(
+              "px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px",
+              activeTab === tab
+                ? "border-rx-blue text-rx-blue"
+                : "border-transparent text-rx-text-muted hover:text-rx-text-secondary"
+            )}
+          >
+            {tab === "runs" ? "Campaign Runs" : "Templates"}
+            {tab === "runs" && runs.length > 0 && (
+              <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-rx-overlay text-rx-text-muted">
+                {runs.length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Loading state */}
+      {loading && (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 size={24} className="animate-spin text-rx-text-muted" />
+        </div>
+      )}
+
+      {/* Error state */}
+      {!loading && error && (
+        <div className="flex items-center gap-2 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+          <AlertTriangle size={16} /> {error}
+        </div>
+      )}
+
+      {/* Campaign runs tab */}
+      {!loading && !error && activeTab === "runs" && (
+        <>
+          {runs.length === 0 ? (
+            <EmptyState plan={plan as PlanName} onNew={() => setShowNewModal(true)} />
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {runs.map((run) => (
+                <div key={run.id} className={cn(actionLoading === run.id ? "opacity-60 pointer-events-none" : "")}>
+                  <CampaignRunCard
+                    run={run}
+                    onPauseToggle={handlePauseToggle}
+                    onPauseOffer={handlePauseOffer}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Templates tab */}
+      {!loading && !error && activeTab === "templates" && (
+        <TemplatesTab
+          templates={templates}
+          plan={plan as PlanName}
+          onNew={() => setShowNewModal(true)}
+        />
+      )}
+
+      {/* New template modal */}
+      {showNewModal && (
+        <NewTemplateModal
+          plan={plan as PlanName}
+          onClose={() => setShowNewModal(false)}
+          onCreated={(t) => {
+            setTemplates((prev) => [...prev, t]);
+            setShowNewModal(false);
+            setActiveTab("templates");
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Templates tab ────────────────────────────────────────────────────────────
+
+function TemplatesTab({
+  templates,
+  plan,
+  onNew,
+}: {
+  templates: CampaignTemplate[];
+  plan: PlanName;
+  onNew: () => void;
+}) {
+  const plusJakartaInner = Plus_Jakarta_Sans({ subsets: ["latin"], weight: ["500", "600", "700"] });
+  const dmSansInner = DM_Sans({ subsets: ["latin"], weight: ["400", "500"] });
+
+  const merchantTemplates = templates.filter((t) => t.type === "merchant_master");
+  const systemTemplates = templates.filter((t) => t.type === "system_default");
+
+  return (
+    <div className="space-y-6">
+      {/* Merchant templates */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className={cn("text-sm font-semibold text-rx-text-primary", plusJakartaInner.className)}>
+            Custom Templates
+          </h2>
+          {planLimits[plan]?.canCreate && merchantTemplates.length < planLimits[plan].maxTemplates && (
+            <button
+              onClick={onNew}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-rx-blue/10 text-rx-blue hover:bg-rx-blue/20 transition-colors font-medium"
+            >
+              <Plus size={12} /> New template
+            </button>
+          )}
+        </div>
+
+        {merchantTemplates.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border p-8 text-center">
+            <p className={cn("text-sm text-rx-text-muted mb-3", dmSansInner.className)}>
+              {planLimits[plan]?.canCreate
+                ? "No custom templates yet. Create one to override the system defaults."
+                : "Upgrade to Growth or Scale to create custom campaign templates."}
+            </p>
+            {planLimits[plan]?.canCreate && (
+              <button
+                onClick={onNew}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-rx-blue text-sm font-semibold text-white hover:opacity-90 transition-opacity mx-auto"
+              >
+                <Plus size={14} /> New template
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {merchantTemplates.map((t) => (
+              <TemplateCard key={t.id} template={t} plan={plan} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* System templates */}
+      {systemTemplates.length > 0 && (
+        <div>
+          <h2 className={cn("text-sm font-semibold text-rx-text-primary mb-3", plusJakartaInner.className)}>
+            System Defaults
+          </h2>
+          <div className="space-y-3">
+            {systemTemplates.map((t) => (
+              <TemplateCard key={t.id} template={t} plan={plan} readOnly />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TemplateCard({
+  template,
+  plan,
+  readOnly = false,
+}: {
+  template: CampaignTemplate;
+  plan: PlanName;
+  readOnly?: boolean;
+}) {
+  const plusJakartaInner = Plus_Jakarta_Sans({ subsets: ["latin"], weight: ["500", "600", "700"] });
+  const dmSansInner = DM_Sans({ subsets: ["latin"], weight: ["400", "500"] });
+
+  const timelineSteps: TimelineStep[] = template.steps
+    .sort((a, b) => a.stepNumber - b.stepNumber)
+    .map((s) => ({
+      day: `Day ${s.dayOffset}`,
+      channels: [s.preferredChannel],
+    }));
+
+  const channelCounts = template.steps.reduce(
+    (acc, s) => { acc[s.preferredChannel] = (acc[s.preferredChannel] || 0) + 1; return acc; },
+    {} as Record<ChannelType, number>
+  );
+
+  return (
+    <div className="bg-rx-surface border border-border rounded-xl p-5">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className={cn("font-semibold text-sm text-rx-text-primary", plusJakartaInner.className)}>
+              {template.name}
+            </h3>
+            {readOnly && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-rx-overlay text-rx-text-muted">
+                System default
+              </span>
+            )}
+            {!readOnly && plan === "scale" && (
+              <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-md bg-rx-blue/10 text-rx-blue">
+                <Sparkles size={9} /> AI
+              </span>
+            )}
+          </div>
+          <p className={cn("text-[11px] text-rx-text-muted mt-0.5", dmSansInner.className)}>
+            {template.steps.length} step{template.steps.length !== 1 ? "s" : ""}
+            {channelCounts.email ? ` · ${channelCounts.email} email` : ""}
+            {channelCounts.whatsapp ? ` · ${channelCounts.whatsapp} WhatsApp` : ""}
+            {channelCounts.sms ? ` · ${channelCounts.sms} SMS` : ""}
+          </p>
+        </div>
+        {!readOnly && (
+          <a
+            href={`/dashboard/campaigns/${template.id}`}
+            className="flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-rx-overlay text-rx-text-secondary hover:text-rx-text-primary transition-colors font-medium"
+          >
+            <Settings size={12} /> Edit
+          </a>
+        )}
+      </div>
+
+      {timelineSteps.length > 0 && (
+        <div className="px-1">
+          <CampaignTimeline steps={timelineSteps} currentStep={-1} />
+        </div>
+      )}
+    </div>
+  );
+}

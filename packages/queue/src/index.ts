@@ -14,3 +14,9 @@ export * from './types/gateway.types';
 // analyticsQueue: daily snapshot computation
 export * from './queues/recovery.queue';
 export * from './types/recovery.types';
+
+// Campaign (dunning sequence) queues
+// campaignQueue: validate → schedule → execute steps → cancel on recovery
+// paydayQueue: 1st + 25th of month payday notifications
+export * from './queues/campaign.queue';
+export * from './types/campaign.types';

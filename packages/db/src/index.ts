@@ -19,6 +19,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as merchantSchema from './schema/merchants';
 import * as paymentSchema from './schema/payments';
+import * as campaignSchema from './schema/campaigns';
 
 // ── Schema exports ────────────────────────────────────────────────────────────
 
@@ -28,9 +29,13 @@ export * from './schema/merchants';
 // Payment recovery engine (gateway connections, failed payments, jobs, analytics)
 export * from './schema/payments';
 
+// Campaign (dunning sequence) engine
+export * from './schema/campaigns';
+
 // ── Query exports ─────────────────────────────────────────────────────────────
 export * from './queries/onboarding';
 export * from './queries/payments';
+export * from './queries/campaigns';
 
 // ── Drizzle ORM operators ─────────────────────────────────────────────────────
 // Re-exported so consumers don't need 'drizzle-orm' as a direct dependency
@@ -58,6 +63,7 @@ export const createDb = (connectionString: string) => {
   const schema = {
     ...merchantSchema,
     ...paymentSchema,
+    ...campaignSchema,
   };
 
   const client = postgres(connectionString, {
