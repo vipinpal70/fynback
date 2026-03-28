@@ -19,7 +19,7 @@ function getDb() {
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { templateId: string } }
+  { params }: { params: Promise<{ templateId: string }> }
 ) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -29,7 +29,7 @@ export async function PATCH(
     if (!merchantId) return NextResponse.json({ error: 'Merchant not found' }, { status: 404 });
 
     const db = getDb();
-    const { templateId } = params;
+    const { templateId } = await params;
 
     // Verify the template belongs to this merchant (not a system default)
     const rows = await db
