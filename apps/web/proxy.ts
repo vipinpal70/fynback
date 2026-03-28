@@ -5,12 +5,32 @@ const isPublicRoute = createRouteMatcher(['/', '/sign-in(.*)', '/sign-up(.*)', '
 const isProtectedRoute = createRouteMatcher(['/dashboard(.*)', '/onboarding(.*)'])
 const isOnboardingRoute = createRouteMatcher(['/onboarding'])
 
+/**
+ * Reconstructs the public-facing URL from nginx's X-Forwarded-* headers.
+ * Next.js runs on localhost:3000 behind nginx, so req.url is the internal
+ * address. Without this, redirectToSignIn() produces a redirect_url that
+ * points at localhost:3000, which Clerk rejects and confuses the merchant.
+ */
+function getPublicUrl(req: NextRequest): string {
+    const forwardedProto = req.headers.get('x-forwarded-proto') ?? 'https'
+    const forwardedHost = req.headers.get('x-forwarded-host') ?? req.headers.get('host')
+
+    if (forwardedHost) {
+        const proto = forwardedProto.split(',')[0].trim()
+        return `${proto}://${forwardedHost}${req.nextUrl.pathname}${req.nextUrl.search}`
+    }
+
+    // Fallback: use NEXT_PUBLIC_APP_URL + path (safe for production)
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://fynback.com'
+    return `${appUrl.replace(/\/$/, '')}${req.nextUrl.pathname}${req.nextUrl.search}`
+}
+
 export default clerkMiddleware(async (auth, req: NextRequest) => {
     const { userId, sessionClaims, redirectToSignIn } = await auth()
 
-    // 1. Handle Unauthenticated users
+    // 1. Handle Unauthenticated users — use public URL so redirect_url is correct
     if (!userId && isProtectedRoute(req)) {
-        return redirectToSignIn({ returnBackUrl: req.url })
+        return redirectToSignIn({ returnBackUrl: getPublicUrl(req) })
     }
 
     // 2. Determine onboarding status from JWT (Session Claims) OR cookie fallback.
@@ -49,6 +69,10 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
     }
 
     return res
+}, {
+    // Tell the server-side Clerk SDK to route auth requests through your proxy.
+    // Must match NEXT_PUBLIC_CLERK_PROXY_URL in .env
+    proxyUrl: process.env.NEXT_PUBLIC_CLERK_PROXY_URL,
 })
 
 export const config = {

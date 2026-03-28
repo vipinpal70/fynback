@@ -99,7 +99,10 @@ export default function RootLayout({
 			suppressHydrationWarning
 		>
 			<body className="min-h-full flex flex-col" suppressHydrationWarning>
-				<ClerkProvider>
+				<ClerkProvider
+					domain={process.env.NEXT_PUBLIC_CLERK_DOMAIN ?? "fynback.com"}
+					proxyUrl={process.env.NEXT_PUBLIC_CLERK_PROXY_URL}
+				>
 					<TooltipProvider>
 						{children}
 					</TooltipProvider>
