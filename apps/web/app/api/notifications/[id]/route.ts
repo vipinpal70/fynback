@@ -7,13 +7,13 @@ import { getMerchantIdFromClerkUserId } from '@/lib/merchant';
 const dbUrl = process.env.DATABASE_URL!;
 const db = createDb(dbUrl);
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const id = params.id;
+  const { id } = await params;
   if (!id) {
       return NextResponse.json({ error: 'ID is required' }, { status: 400 });
   }
@@ -41,13 +41,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const { userId } = await auth();
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
   
-    const id = params.id;
+    const { id } = await params;
     if (!id) {
         return NextResponse.json({ error: 'ID is required' }, { status: 400 });
     }
