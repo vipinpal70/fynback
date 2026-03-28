@@ -595,14 +595,32 @@ async function handleCancelRun(
   });
 
   // ── 4. Send recovery confirmation to customer ───────────────────────────
-  if (data.merchantFromEmail && data.customerEmail) {
+  // Brand settings may be passed in the job, or (when called from retry success)
+  // they'll be empty strings — load from DB in that case.
+  let fromEmail = data.merchantFromEmail;
+  let fromName = data.merchantFromName;
+  let companyName = data.merchantCompanyName;
+
+  if (!fromEmail) {
+    const [brandRows, merchantRows] = await Promise.all([
+      db.select({ fromEmail: merchantBrandSettings.fromEmail, fromName: merchantBrandSettings.fromName })
+        .from(merchantBrandSettings).where(eq(merchantBrandSettings.merchantId, data.merchantId)).limit(1),
+      db.select({ companyName: merchants.companyName })
+        .from(merchants).where(eq(merchants.id, data.merchantId)).limit(1),
+    ]);
+    fromEmail = brandRows[0]?.fromEmail ?? 'recovery@fynback.com';
+    fromName = brandRows[0]?.fromName ?? 'Payment Recovery';
+    companyName = merchantRows[0]?.companyName ?? 'Our service';
+  }
+
+  if (fromEmail && data.customerEmail) {
     const amount = formatAmount(data.amountPaise, data.currency);
     await resend.emails.send({
-      from: `${data.merchantFromName || 'Our Team'} <${data.merchantFromEmail}>`,
+      from: `${fromName || 'Our Team'} <${fromEmail}>`,
       to: data.customerEmail,
-      subject: `You're all caught up! Payment received — ${data.merchantCompanyName}`,
-      html: buildRecoveryConfirmationEmail(data, amount),
-      text: `Hi ${data.customerName ?? 'there'},\n\nGreat news! Your payment of ${amount} has been received. Your ${data.merchantCompanyName} subscription is fully active.\n\nThank you!\n\n— ${data.merchantCompanyName} Team`,
+      subject: `You're all caught up! Payment received — ${companyName}`,
+      html: buildRecoveryConfirmationEmail({ ...data, merchantFromName: fromName, merchantFromEmail: fromEmail, merchantCompanyName: companyName }, amount),
+      text: `Hi ${data.customerName ?? 'there'},\n\nGreat news! Your payment of ${amount} has been received. Your ${companyName} subscription is fully active.\n\nThank you!\n\n— ${companyName} Team`,
     });
   }
 

@@ -14,7 +14,7 @@ import { auth } from '@clerk/nextjs/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { getMerchantIdFromClerkUserId } from '@/lib/merchant';
 import {
-  createDb, campaignQueries, merchants, failedPayments, campaignSteps,
+  createDb, campaignQueries, merchants, merchantBrandSettings, failedPayments, campaignSteps,
   campaignTemplates as campaignTemplatesTable,
   eq,
 } from '@fynback/db';
@@ -43,11 +43,17 @@ export async function GET(req: NextRequest) {
 
     const db = getDb();
 
-    // Fetch merchant info first (need plan to pick system defaults)
-    const merchantRows = await db
-      .select({ plan: merchants.plan, companyName: merchants.companyName, campaignsPaused: merchants.campaignsPaused })
-      .from(merchants).where(eq(merchants.id, merchantId)).limit(1);
-    const merchant = merchantRows[0] ?? null;
+    // Fetch merchant info + brand settings (need plan and campaign preference)
+    const [merchantRows, brandRows] = await Promise.all([
+      db.select({ plan: merchants.plan, companyName: merchants.companyName, campaignsPaused: merchants.campaignsPaused })
+        .from(merchants).where(eq(merchants.id, merchantId)).limit(1),
+      db.select({ defaultCampaignPreference: merchantBrandSettings.defaultCampaignPreference })
+        .from(merchantBrandSettings).where(eq(merchantBrandSettings.merchantId, merchantId)).limit(1),
+    ]);
+    const merchantBase = merchantRows[0] ?? null;
+    const merchant = merchantBase
+      ? { ...merchantBase, defaultCampaignPreference: brandRows[0]?.defaultCampaignPreference ?? 'standard_10d' }
+      : null;
     const plan = merchant?.plan ?? 'trial';
 
     // Fetch runs + templates in parallel (now that we have the plan)

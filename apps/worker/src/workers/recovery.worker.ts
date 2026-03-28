@@ -34,9 +34,9 @@
 import { Worker, type Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { Resend } from 'resend';
-import { createDb, paymentQueries } from '@fynback/db';
-import type { RecoveryJobData, RetryPaymentJobData, SendEmailJobData } from '@fynback/queue';
-import { recoveryQueue } from '@fynback/queue';
+import { createDb, paymentQueries, campaignQueries, merchantBrandSettings, merchants, eq } from '@fynback/db';
+import type { RecoveryJobData, RetryPaymentJobData, SendEmailJobData, CancelCampaignRunJobData } from '@fynback/queue';
+import { recoveryQueue, campaignQueue } from '@fynback/queue';
 import { formatINR } from '@fynback/shared';
 import { getRetrySchedule } from '../lib/retry-scheduler';
 
@@ -264,9 +264,36 @@ async function handleRetryPayment(job: Job<RetryPaymentJobData>): Promise<void> 
       status: 'recovered',
       recoveredAt: new Date(),
       recoveredAmountPaise: data.amountPaise,
-      recoveryAttributedToFynback: true, // Auto-retry = directly attributed to FynBack
+      recoveryAttributedToFynback: true,
       retryCount: (failedPayment.retryCount ?? 0) + 1,
     });
+
+    // Cancel the campaign run that was started for this payment (stops pending step jobs
+    // and sends a recovery confirmation email to the customer via the campaign worker).
+    const activeRun = await campaignQueries.getActiveCampaignRun(db, data.failedPaymentId);
+    if (activeRun) {
+      await campaignQueue.add(
+        'cancel_campaign_run',
+        {
+          type: 'cancel_campaign_run',
+          campaignRunId: activeRun.id,
+          failedPaymentId: data.failedPaymentId,
+          merchantId: data.merchantId,
+          customerId: activeRun.customerId ?? undefined,
+          customerEmail: data.customerEmail,
+          customerPhone: data.customerPhone,
+          customerName: data.customerName,
+          amountPaise: data.amountPaise,
+          currency: data.currency,
+          // Pass empty strings — handleCancelRun loads brand settings from DB when empty
+          merchantFromEmail: '',
+          merchantFromName: '',
+          merchantCompanyName: '',
+        } satisfies CancelCampaignRunJobData,
+        { priority: 1 }
+      );
+      console.log(`[RecoveryWorker] Dispatched cancel_campaign_run for run ${activeRun.id}`);
+    }
 
     console.log(`[RecoveryWorker] Payment ${data.failedPaymentId} recovered via auto-retry! ₹${data.amountPaise / 100}`);
     return;
@@ -322,15 +349,13 @@ async function handleRetryPayment(job: Job<RetryPaymentJobData>): Promise<void> 
       `[RecoveryWorker] Scheduled retry ${nextAttemptNumber}/${maxRetries} for payment ${data.failedPaymentId} at ${retrySchedule.scheduledAt.toISOString()}`
     );
   } else {
-    // Max retries exhausted — escalate to email sequence
-    console.log(`[RecoveryWorker] Max retries (${maxRetries}) exhausted for payment ${data.failedPaymentId}. Starting email sequence.`);
+    // Max retries exhausted — campaign worker is already running the dunning sequence.
+    // Just update the status so the dashboard reflects where we are.
+    console.log(`[RecoveryWorker] Max retries (${maxRetries}) exhausted for payment ${data.failedPaymentId}. Campaign worker handles outreach.`);
 
     await paymentQueries.updateFailedPaymentStatus(db, data.failedPaymentId, {
       status: 'email_sequence',
     });
-
-    // Dispatch Step 1 email immediately
-    await dispatchEmailJob(data.failedPaymentId, data.merchantId, data, 1);
   }
 }
 

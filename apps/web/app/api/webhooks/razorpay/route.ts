@@ -26,10 +26,10 @@
 
 import { NextResponse } from 'next/server';
 import { createHmac, timingSafeEqual } from 'crypto';
-import { createDb, gatewayConnections, failedPayments, recoveryJobs, eq, and, isNull } from '@fynback/db';
+import { createDb, gatewayConnections, failedPayments, recoveryJobs, merchants, eq, and, isNull } from '@fynback/db';
 import { cacheDelete } from '@/lib/cache/redis';
-import { recoveryQueue } from '@fynback/queue';
-import type { SendEmailJobData, RetryPaymentJobData, SendWhatsAppJobData } from '@fynback/queue';
+import { recoveryQueue, campaignQueue } from '@fynback/queue';
+import type { RetryPaymentJobData, ValidateCustomerChannelsJobData } from '@fynback/queue';
 import { decrypt } from '@/lib/crypto';
 import { categorizeDecline, mapPaymentMethod } from '@/lib/gateways/razorpay';
 import { getRetrySchedule } from '@/lib/recovery/retry-scheduler';
@@ -369,35 +369,56 @@ export async function POST(request: Request) {
     cacheDelete(`kpis:${merchantId}`),
   ]).catch(() => {});
 
-  // ── Dispatch recovery job ───────────────────────────────────────────────────
+  // ── Dispatch recovery jobs ──────────────────────────────────────────────────
   const contactChannel = getContactChannel(normalized.customerEmail, normalized.customerPhone);
 
-  // No way to reach this customer — record it and stop.
-  // Dashboard will show the payment with a "No contact info" badge.
-  // Merchant should look up the customer in their gateway dashboard manually.
+  // No way to reach this customer — mark cancelled and stop.
   if (contactChannel === 'none') {
     await db
       .update(failedPayments)
       .set({ status: 'cancelled', updatedAt: new Date() })
       .where(eq(failedPayments.id, inserted.id));
-    console.log(`[Razorpay Webhook] merchant=${merchantId} event=${event} payment=${inserted.id} — no contact info, marked cancelled`);
+    console.log(`[Razorpay Webhook] merchant=${merchantId} payment=${inserted.id} — no contact info, cancelled`);
     return NextResponse.json({ received: true, event, failedPaymentId: inserted.id, action: 'no_contact' });
   }
 
-  const brand = await getBrandSettings(db, merchantId);
+  // Get merchant plan so the campaign worker picks the right system-default template.
+  const merchantRow = await db
+    .select({ plan: merchants.plan })
+    .from(merchants)
+    .where(eq(merchants.id, merchantId))
+    .limit(1);
+  const planRequired = merchantRow[0]?.plan ?? 'trial';
 
-  // Phone-only (void@razorpay.com was sanitized to null): skip email, go straight to WhatsApp
-  if (contactChannel === 'phone') {
-    await dispatchWhatsAppJob(db, inserted.id, merchantId, normalized, 1);
-    console.log(`[Razorpay Webhook] merchant=${merchantId} event=${event} payment=${inserted.id} — phone-only, WhatsApp dispatched`);
-    return NextResponse.json({ received: true, event, failedPaymentId: inserted.id });
-  }
+  // ── Job 1: Start the dunning campaign sequence (always) ─────────────────────
+  // validate_customer_channels → schedule_campaign → execute_campaign_step × N
+  // This is the primary outreach path: email + WhatsApp/SMS with proper DB tracking.
+  await campaignQueue.add(
+    'validate_customer_channels',
+    {
+      type: 'validate_customer_channels',
+      failedPaymentId: inserted.id,
+      merchantId,
+      customerEmail: normalized.customerEmail ?? undefined,
+      customerPhone: normalized.customerPhone ?? undefined,
+      customerName: normalized.customerName ?? undefined,
+      gatewayCustomerId: normalized.gatewayCustomerId ?? undefined,
+      amountPaise: normalized.amountPaise,
+      currency: normalized.currency,
+      declineCategory: normalized.declineCategory,
+      planRequired,
+    } satisfies ValidateCustomerChannelsJobData,
+    { priority: 1 }
+  );
 
-  // Has email (contactChannel === 'email' | 'both') — use normal retry → email sequence
-  if (!normalized.isRecoverable || normalized.paymentMethodType === 'net_banking') {
-    // Skip straight to email — can't auto-retry these
-    await dispatchEmailJob(db, inserted.id, merchantId, normalized, 1, brand);
-  } else {
+  // ── Job 2: Schedule gateway auto-retry (only for retryable subscription payments) ──
+  // Runs in parallel with the campaign. If retry succeeds, it cancels the campaign run.
+  // Not applicable for: hard declines, net_banking (no retry API), phone-only contacts.
+  const canAutoRetry = normalized.isRecoverable
+    && normalized.paymentMethodType !== 'net_banking'
+    && contactChannel !== 'phone';  // Phone-only: no email to send payment link — campaign handles it
+
+  if (canAutoRetry) {
     const retrySchedule = getRetrySchedule(
       normalized.paymentMethodType,
       normalized.declineCategory,
@@ -444,113 +465,10 @@ export async function POST(request: Request) {
       .where(eq(failedPayments.id, inserted.id));
   }
 
-  console.log(`[Razorpay Webhook] merchant=${merchantId} event=${event} payment=${inserted.id} — recovery dispatched`);
+  console.log(
+    `[Razorpay Webhook] merchant=${merchantId} payment=${inserted.id} — ` +
+    `campaign started, retry=${canAutoRetry}`
+  );
   return NextResponse.json({ received: true, event, failedPaymentId: inserted.id });
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-async function getBrandSettings(db: ReturnType<typeof createDb>, merchantId: string) {
-  const { merchantBrandSettings } = await import('@fynback/db');
-  const { eq } = await import('@fynback/db');
-  const rows = await db.select().from(merchantBrandSettings).where(eq(merchantBrandSettings.merchantId, merchantId)).limit(1);
-  return rows[0] ?? null;
-}
-
-async function dispatchWhatsAppJob(
-  db: ReturnType<typeof createDb>,
-  failedPaymentId: string,
-  merchantId: string,
-  normalized: NormalizedPayment,
-  stepNumber: number,
-) {
-  const amountRupees = `₹${(normalized.amountPaise / 100).toLocaleString('en-IN')}`;
-  const job = await recoveryQueue.add(
-    'send_whatsapp',
-    {
-      type: 'send_whatsapp',
-      failedPaymentId,
-      merchantId,
-      recoveryJobDbId: '',
-      amountPaise: normalized.amountPaise,
-      currency: normalized.currency,
-      customerPhone: normalized.customerPhone ?? undefined,
-      customerName: normalized.customerName ?? undefined,
-      gatewayName: 'razorpay',
-      gatewayPaymentId: normalized.gatewayPaymentId ?? '',
-      gatewaySubscriptionId: normalized.gatewaySubscriptionId ?? undefined,
-      stepNumber,
-      // Template must be pre-approved in the merchant's WhatsApp Business account
-      templateName: 'payment_failed_reminder_v1',
-      templateVariables: [
-        normalized.customerName ?? 'there',
-        amountRupees,
-      ],
-    } satisfies SendWhatsAppJobData,
-    { priority: 1 }
-  );
-
-  await db.insert(recoveryJobs).values({
-    failedPaymentId,
-    merchantId,
-    bullmqJobId: job.id,
-    jobType: 'send_whatsapp',
-    status: 'pending',
-    attemptNumber: stepNumber,
-    scheduledAt: new Date(),
-  });
-
-  await db
-    .update(failedPayments)
-    .set({ status: 'whatsapp_sent', updatedAt: new Date() })
-    .where(eq(failedPayments.id, failedPaymentId));
-
-  return job;
-}
-
-async function dispatchEmailJob(
-  db: ReturnType<typeof createDb>,
-  failedPaymentId: string,
-  merchantId: string,
-  normalized: NormalizedPayment,
-  stepNumber: number,
-  brand: Awaited<ReturnType<typeof getBrandSettings>>
-) {
-  const job = await recoveryQueue.add(
-    'send_email',
-    {
-      type: 'send_email',
-      failedPaymentId,
-      merchantId,
-      recoveryJobDbId: '',
-      amountPaise: normalized.amountPaise,
-      currency: normalized.currency,
-      customerEmail: normalized.customerEmail ?? undefined,
-      customerPhone: normalized.customerPhone ?? undefined,
-      customerName: normalized.customerName ?? undefined,
-      gatewayName: 'razorpay',
-      gatewayPaymentId: normalized.gatewayPaymentId ?? '',
-      gatewaySubscriptionId: normalized.gatewaySubscriptionId ?? undefined,
-      stepNumber,
-      merchantFromName: brand?.fromName ?? 'FynBack Recovery',
-      merchantFromEmail: brand?.fromEmail ?? 'recovery@fynback.com',
-      merchantReplyTo: brand?.replyToEmail ?? 'support@fynback.com',
-      merchantBrandColor: brand?.brandColorHex ?? '#00e878',
-      paymentLink: undefined,
-      includePauseOffer: stepNumber >= 3,
-    } satisfies SendEmailJobData,
-    { priority: 2 }
-  );
-
-  await db.insert(recoveryJobs).values({
-    failedPaymentId,
-    merchantId,
-    bullmqJobId: job.id,
-    jobType: 'send_email',
-    status: 'pending',
-    attemptNumber: stepNumber,
-    scheduledAt: new Date(),
-  });
-
-  return job;
-}

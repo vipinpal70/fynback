@@ -96,6 +96,7 @@ interface MerchantInfo {
   plan: PlanName;
   companyName: string;
   campaignsPaused: boolean;
+  defaultCampaignPreference: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -528,6 +529,12 @@ function RunRow({
 
 // ─── Campaign Runs tab ────────────────────────────────────────────────────────
 
+const campaignPreferenceLabel: Record<string, string> = {
+  aggressive_7d: "Aggressive 7-day",
+  standard_10d: "Standard 10-day",
+  gentle_14d: "Gentle 14-day",
+};
+
 function CampaignRunsTab({
   templates,
   runs,
@@ -570,9 +577,24 @@ function CampaignRunsTab({
       {/* ── Strategy section ── */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h2 className={cn("text-sm font-semibold text-rx-text-secondary", plusJakarta.className)}>
-            Active Campaign Strategy
-          </h2>
+          <div>
+            <h2 className={cn("text-sm font-semibold text-rx-text-secondary", plusJakarta.className)}>
+              Active Campaign Strategy
+            </h2>
+            {merchant?.defaultCampaignPreference && (
+              <p className={cn("text-[11px] text-rx-text-muted mt-0.5", dmSans.className)}>
+                Onboarding preference:{" "}
+                <span className="text-rx-text-secondary font-medium">
+                  {campaignPreferenceLabel[merchant.defaultCampaignPreference] ?? merchant.defaultCampaignPreference}
+                </span>
+                {!canControl && (
+                  <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-md bg-rx-overlay text-rx-text-muted">
+                    Custom cadences on Growth+
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
           {canControl && merchantMasters.length === 0 && (
             <button
               onClick={onNew}

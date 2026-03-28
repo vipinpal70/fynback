@@ -132,6 +132,12 @@ export const merchantBrandSettings = pgTable('merchant_brand_settings', {
     notifyOnFailure: boolean('notify_on_failure').notNull().default(true),
     notifyOnHardDecline: boolean('notify_on_hard_decline').notNull().default(true),
     notifyOnGatewayIssue: boolean('notify_on_gateway_issue').notNull().default(true),
+    /**
+     * The recovery campaign style the merchant selected during onboarding.
+     * Maps to: 'aggressive_7d' | 'standard_10d' | 'gentle_14d'
+     * Used to highlight the matching system default on the campaigns dashboard.
+     */
+    defaultCampaignPreference: text('default_campaign_preference').default('standard_10d'),
     digestFrequency: digestFrequencyEnum('digest_frequency').notNull().default('daily'),
     digestEmail: text('digest_email'),
     digestSendTime: text('digest_send_time').notNull().default('09:00:00'),

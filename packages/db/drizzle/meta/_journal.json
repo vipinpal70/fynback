@@ -15,6 +15,20 @@
       "when": 1774419202589,
       "tag": "0001_sparkling_mandarin",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1743120000000,
+      "tag": "0002_add_campaign_preference",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1774719009797,
+      "tag": "0003_nappy_chat",
+      "breakpoints": true
     }
   ]
 }

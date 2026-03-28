@@ -31,9 +31,10 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { normalizeWebhook } from '@fynback/shared';
-import { createDb, paymentQueries } from '@fynback/db';
-import { recoveryQueue } from '@fynback/queue';
-import type { RetryPaymentJobData, SendEmailJobData } from '@fynback/queue';
+import { createDb, paymentQueries, merchants, failedPayments, eq } from '@fynback/db';
+import { cacheDelete } from '@/lib/cache/redis';
+import { recoveryQueue, campaignQueue } from '@fynback/queue';
+import type { RetryPaymentJobData, ValidateCustomerChannelsJobData } from '@fynback/queue';
 import { getRetrySchedule } from '@/lib/recovery/retry-scheduler';
 import { getMerchantIdFromStripeCustomer } from '@/lib/recovery/gateway-helpers';
 
@@ -51,6 +52,17 @@ const MAX_RETRIES: Record<string, number> = {
   wallet: 1,
   emi: 0,
 };
+
+type ContactChannel = 'email' | 'phone' | 'both' | 'none';
+
+function getContactChannel(email: string | null | undefined, phone: string | null | undefined): ContactChannel {
+  const hasEmail = !!email;
+  const hasPhone = !!phone;
+  if (hasEmail && hasPhone) return 'both';
+  if (hasEmail) return 'email';
+  if (hasPhone) return 'phone';
+  return 'none';
+}
 
 export async function POST(request: Request) {
   // ── Step 1: Read raw body as ArrayBuffer ───────────────────────────────────
@@ -173,12 +185,63 @@ export async function POST(request: Request) {
     );
   }
 
-  // ── Step 9: Dispatch recovery job ─────────────────────────────────────────
-  if (!normalized.isRecoverable || normalized.paymentMethodType === 'net_banking') {
-    // Non-recoverable or net banking → go straight to email
-    await dispatchInitialEmailJob(db, failedPayment.id, merchantId, normalized);
-  } else {
-    // Recoverable → schedule auto-retry
+  // Bust dashboard cache so the new failure appears immediately (fire-and-forget)
+  Promise.allSettled([
+    cacheDelete(`payments:${merchantId}:recent:6`),
+    cacheDelete(`payments:${merchantId}:recent:10`),
+    cacheDelete(`payments:${merchantId}:recent:50`),
+    cacheDelete(`kpis:${merchantId}`),
+  ]).catch(() => {});
+
+  // ── Step 9: Dispatch recovery jobs ────────────────────────────────────────
+  const contactChannel = getContactChannel(normalized.customerEmail, normalized.customerPhone);
+
+  // No way to reach this customer — mark cancelled and stop.
+  if (contactChannel === 'none') {
+    await db
+      .update(failedPayments)
+      .set({ status: 'cancelled', updatedAt: new Date() })
+      .where(eq(failedPayments.id, failedPayment.id));
+    console.log(`[Stripe Webhook] merchant=${merchantId} payment=${failedPayment.id} — no contact info, cancelled`);
+    return NextResponse.json({ received: true, failedPaymentId: failedPayment.id, action: 'no_contact' });
+  }
+
+  // Get merchant plan so the campaign worker picks the right system-default template.
+  const merchantRow = await db
+    .select({ plan: merchants.plan })
+    .from(merchants)
+    .where(eq(merchants.id, merchantId))
+    .limit(1);
+  const planRequired = merchantRow[0]?.plan ?? 'trial';
+
+  // ── Job 1: Start the dunning campaign sequence (always) ─────────────────────
+  // validate_customer_channels → schedule_campaign → execute_campaign_step × N
+  await campaignQueue.add(
+    'validate_customer_channels',
+    {
+      type: 'validate_customer_channels',
+      failedPaymentId: failedPayment.id,
+      merchantId,
+      customerEmail: normalized.customerEmail ?? undefined,
+      customerPhone: normalized.customerPhone ?? undefined,
+      customerName: normalized.customerName ?? undefined,
+      gatewayCustomerId: normalized.gatewayCustomerId ?? undefined,
+      amountPaise: normalized.amountPaise,
+      currency: normalized.currency,
+      declineCategory: normalized.declineCategory,
+      planRequired,
+    } satisfies ValidateCustomerChannelsJobData,
+    { priority: 1 }
+  );
+
+  // ── Job 2: Schedule gateway auto-retry (only for retryable subscription payments) ──
+  // Runs in parallel with the campaign. If retry succeeds, it cancels the campaign run.
+  // Not applicable for: hard declines, net_banking (no retry API), phone-only contacts.
+  const canAutoRetry = normalized.isRecoverable
+    && normalized.paymentMethodType !== 'net_banking'
+    && contactChannel !== 'phone';
+
+  if (canAutoRetry) {
     const retrySchedule = getRetrySchedule(
       normalized.paymentMethodType,
       normalized.declineCategory,
@@ -195,21 +258,18 @@ export async function POST(request: Request) {
         recoveryJobDbId: '',
         amountPaise: normalized.amountPaise,
         currency: normalized.currency,
-        customerEmail: normalized.customerEmail,
-        customerPhone: normalized.customerPhone,
-        customerName: normalized.customerName,
+        customerEmail: normalized.customerEmail ?? undefined,
+        customerPhone: normalized.customerPhone ?? undefined,
+        customerName: normalized.customerName ?? undefined,
         gatewayName: normalized.gatewayName,
         gatewayPaymentId: normalized.gatewayPaymentId,
-        gatewaySubscriptionId: normalized.gatewaySubscriptionId,
+        gatewaySubscriptionId: normalized.gatewaySubscriptionId ?? undefined,
         stepNumber: 1,
         attemptNumber: 1,
         paymentMethodType: normalized.paymentMethodType,
         isRecoverable: normalized.isRecoverable,
       } satisfies RetryPaymentJobData,
-      {
-        delay: retrySchedule.delayMs,
-        priority: 1,
-      }
+      { delay: retrySchedule.delayMs, priority: 1 }
     );
 
     await paymentQueries.insertRecoveryJob(db, {
@@ -227,60 +287,9 @@ export async function POST(request: Request) {
     });
   }
 
-  return NextResponse.json({ received: true }, { status: 200 });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper: Initial email job for non-retryable payments
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function dispatchInitialEmailJob(
-  db: ReturnType<typeof createDb>,
-  failedPaymentId: string,
-  merchantId: string,
-  normalized: Extract<ReturnType<typeof normalizeWebhook>, { skip: false }>['data']
-) {
-  const { merchantBrandSettings, eq } = await import('@fynback/db');
-
-  const brandRows = await db
-    .select()
-    .from(merchantBrandSettings)
-    .where(eq(merchantBrandSettings.merchantId, merchantId))
-    .limit(1);
-
-  const brand = brandRows[0];
-
-  const emailJob = await recoveryQueue.add(
-    'send_email',
-    {
-      type: 'send_email',
-      failedPaymentId,
-      merchantId,
-      recoveryJobDbId: '',
-      amountPaise: normalized.amountPaise,
-      currency: normalized.currency,
-      customerEmail: normalized.customerEmail,
-      customerPhone: normalized.customerPhone,
-      customerName: normalized.customerName,
-      gatewayName: normalized.gatewayName,
-      gatewayPaymentId: normalized.gatewayPaymentId,
-      gatewaySubscriptionId: normalized.gatewaySubscriptionId,
-      stepNumber: 1,
-      merchantFromName: brand?.fromName ?? 'FynBack Recovery',
-      merchantFromEmail: brand?.fromEmail ?? 'recovery@fynback.com',
-      merchantReplyTo: brand?.replyToEmail ?? 'support@fynback.com',
-      merchantBrandColor: brand?.brandColorHex ?? '#00e878',
-      includePauseOffer: false,
-    } satisfies SendEmailJobData,
-    { priority: 2 }
+  console.log(
+    `[Stripe Webhook] merchant=${merchantId} payment=${failedPayment.id} — ` +
+    `campaign started, retry=${canAutoRetry}`
   );
-
-  await paymentQueries.insertRecoveryJob(db, {
-    failedPaymentId,
-    merchantId,
-    bullmqJobId: emailJob.id,
-    jobType: 'send_email',
-    attemptNumber: 1,
-    scheduledAt: new Date(),
-  });
+  return NextResponse.json({ received: true, failedPaymentId: failedPayment.id });
 }

@@ -81,6 +81,7 @@ export const completeOnboarding = async (formData: FormData) => {
     const defaultRecoveryCampaign = (formData.get('defaultRecoveryCampaign') as string) || 'standard_10d'
     const whatsappOptIn = formData.get('whatsappOptIn') === 'true'
     const slackWebhookUrl = (formData.get('slackWebhookUrl') as string) || ""
+    const teamEmails = (formData.get('teamEmails') as string) || ""
     const digestFrequency = (formData.get('digestFrequency') as string) || 'daily'
 
     // Subscription fields
@@ -152,6 +153,7 @@ export const completeOnboarding = async (formData: FormData) => {
                 });
 
             // D. Upsert Brand Settings
+            const encryptedSlackWebhook = slackWebhookUrl ? encrypt(slackWebhookUrl) : ""
             await tx
                 .insert(merchantBrandSettings)
                 .values({
@@ -160,8 +162,9 @@ export const completeOnboarding = async (formData: FormData) => {
                     replyToEmail,
                     brandColorHex,
                     whatsappEnabled: whatsappOptIn,
-                    slackWebhookUrl,
+                    slackWebhookUrl: encryptedSlackWebhook,
                     digestFrequency: digestFrequency as any,
+                    defaultCampaignPreference: defaultRecoveryCampaign,
                 })
                 .onConflictDoUpdate({
                     target: merchantBrandSettings.merchantId,
@@ -170,11 +173,31 @@ export const completeOnboarding = async (formData: FormData) => {
                         replyToEmail,
                         brandColorHex,
                         whatsappEnabled: whatsappOptIn,
-                        slackWebhookUrl,
+                        slackWebhookUrl: encryptedSlackWebhook,
                         digestFrequency: digestFrequency as any,
+                        defaultCampaignPreference: defaultRecoveryCampaign,
                         updatedAt: new Date(),
                     },
                 });
+
+            // E. Create team invites (if emails were provided)
+            const emailList = teamEmails
+                .split(',')
+                .map((e) => e.trim().toLowerCase())
+                .filter((e) => e.length > 0 && e.includes('@') && e.includes('.'))
+
+            if (emailList.length > 0) {
+                const inviteRows = emailList.map((email) => ({
+                    merchantId: merchantRecord.id,
+                    email,
+                    role: 'viewer' as const,
+                    token: crypto.randomBytes(32).toString('hex'),
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                    invitedBy: userRecord.id,
+                    status: 'pending',
+                }))
+                await tx.insert(invites).values(inviteRows).onConflictDoNothing()
+            }
 
             return { merchantId: merchantRecord.id, userId: userRecord.id };
         });
