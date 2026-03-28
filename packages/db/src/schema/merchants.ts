@@ -50,6 +50,13 @@ export const merchants = pgTable('merchants', {
     recoveryRatePct: smallint('recovery_rate_pct').notNull().default(0),
     activeFailedPaymentsCount: integer('active_failed_payments_count').notNull().default(0),
     statsLastCalculatedAt: timestamp('stats_last_calculated_at', { withTimezone: true }),
+    /**
+     * When true, the campaign worker skips scheduling new campaign runs for this merchant.
+     * Growth/Scale merchants can toggle this from the dashboard.
+     * WHY ON MERCHANT (not template): system defaults are shared across all merchants —
+     * we can't set isPaused on them per-merchant. This flag is the merchant-level kill switch.
+     */
+    campaignsPaused: boolean('campaigns_paused').default(false).notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     cancelReason: text('cancel_reason'),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),

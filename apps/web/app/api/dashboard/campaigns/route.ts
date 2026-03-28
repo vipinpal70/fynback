@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
 
     // Fetch merchant info first (need plan to pick system defaults)
     const merchantRows = await db
-      .select({ plan: merchants.plan, companyName: merchants.companyName })
+      .select({ plan: merchants.plan, companyName: merchants.companyName, campaignsPaused: merchants.campaignsPaused })
       .from(merchants).where(eq(merchants.id, merchantId)).limit(1);
     const merchant = merchantRows[0] ?? null;
     const plan = merchant?.plan ?? 'trial';
@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
       })
     );
 
-    // Enrich all templates (system defaults + merchant masters) with their steps
+    // Enrich all templates (system defaults + merchant masters) with their steps + stats
     // System defaults shown first, merchant masters after
     const allTemplates = [
       ...systemTemplates.map((t) => ({ ...t, isReadOnly: true })),
@@ -104,16 +104,19 @@ export async function GET(req: NextRequest) {
 
     const templatesWithSteps = await Promise.all(
       allTemplates.map(async (t) => {
-        const steps = await db.select({
-          id: campaignSteps.id,
-          stepNumber: campaignSteps.stepNumber,
-          dayOffset: campaignSteps.dayOffset,
-          preferredChannel: campaignSteps.preferredChannel,
-          isPauseOffer: campaignSteps.isPauseOffer,
-        }).from(campaignSteps)
-          .where(eq(campaignSteps.campaignTemplateId, t.id))
-          .orderBy(campaignSteps.stepNumber);
-        return { ...t, steps };
+        const [steps, stats] = await Promise.all([
+          db.select({
+            id: campaignSteps.id,
+            stepNumber: campaignSteps.stepNumber,
+            dayOffset: campaignSteps.dayOffset,
+            preferredChannel: campaignSteps.preferredChannel,
+            isPauseOffer: campaignSteps.isPauseOffer,
+          }).from(campaignSteps)
+            .where(eq(campaignSteps.campaignTemplateId, t.id))
+            .orderBy(campaignSteps.stepNumber),
+          campaignQueries.getCampaignTemplateStats(db, merchantId, t.id),
+        ]);
+        return { ...t, steps, stats };
       })
     );
 

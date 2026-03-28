@@ -18,9 +18,9 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  Zap, Pause, Play, Edit, X, Plus, ChevronRight, Bell,
+  Zap, Pause, Play, X, Plus, Bell,
   Loader2, AlertTriangle, Sparkles, Calendar, RefreshCw,
-  Mail, MessageSquare, Phone, Check, Settings,
+  Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import CampaignTimeline, { type TimelineStep } from "@/components/dashboard/CampaignTimeline";
@@ -45,24 +45,34 @@ interface CampaignStep {
   isPauseOffer: boolean;
 }
 
+interface TemplateStats {
+  totalRuns: number;
+  recoveredRuns: number;
+  activeRuns: number;
+}
+
 interface CampaignTemplate {
   id: string;
   name: string;
   type: "system_default" | "merchant_master";
-  plan: PlanName;
+  planRequired: string;
   maxSteps: number;
   isActive: boolean;
+  isPaused: boolean;
+  isReadOnly: boolean;
   steps: CampaignStep[];
+  stats: TemplateStats;
 }
 
 interface CampaignRun {
   id: string;
   status: RunStatus;
-  currentStepIndex: number;
+  currentStep: number;
+  totalSteps: number;
   pauseOfferSent: boolean;
   pauseOfferStatus: PauseOfferStatus;
   completedAt: string | null;
-  createdAt: string;
+  startedAt: string;
   failedPaymentId: string;
   customerName: string | null;
   customerEmail: string | null;
@@ -85,6 +95,7 @@ interface PaydayAlert {
 interface MerchantInfo {
   plan: PlanName;
   companyName: string;
+  campaignsPaused: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -102,13 +113,6 @@ function timeAgo(dateStr: string) {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
-}
-
-function runToTimelineSteps(run: CampaignRun): TimelineStep[] {
-  return run.templateSteps.map((step) => ({
-    day: `Day ${step.dayOffset}`,
-    channels: [step.preferredChannel],
-  }));
 }
 
 const statusStyle: Record<RunStatus, string> = {
@@ -166,77 +170,6 @@ function PauseOfferBadge({
   );
 }
 
-function CampaignRunCard({
-  run,
-  onPauseToggle,
-  onPauseOffer,
-}: {
-  run: CampaignRun;
-  onPauseToggle: (runId: string, currentStatus: RunStatus) => void;
-  onPauseOffer: (runId: string, action: "approve" | "reject") => void;
-}) {
-  const timelineSteps = runToTimelineSteps(run);
-  const customerDisplay = run.customerName || run.customerEmail || "Unknown customer";
-  const amount = formatAmount(run.amountPaise, run.currency);
-  const isPaused = run.status === "paused";
-  const isActive = run.status === "active";
-
-  return (
-    <div className="bg-rx-surface border border-border rounded-2xl p-6 card-hover">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 mb-0.5">
-            <h3 className={cn("font-semibold text-rx-text-primary truncate text-sm", plusJakarta.className)}>
-              {customerDisplay}
-            </h3>
-            <span className={cn("text-[10px] px-1.5 py-0.5 rounded-md shrink-0 font-medium", statusStyle[run.status])}>
-              {statusLabel[run.status]}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-[11px]">
-            <span className={cn("font-semibold text-rx-green-text", jetbrains.className)}>{amount}</span>
-            <span className="text-rx-text-muted">·</span>
-            <span className={cn("text-rx-text-muted", dmSans.className)}>{run.templateName}</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5 ml-3 shrink-0">
-          {(isActive || isPaused) && (
-            <button
-              onClick={() => onPauseToggle(run.id, run.status)}
-              className="p-1.5 rounded-md hover:bg-rx-overlay text-rx-text-muted transition-colors"
-              title={isPaused ? "Resume campaign" : "Pause campaign"}
-            >
-              {isPaused ? <Play size={13} /> : <Pause size={13} />}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Timeline */}
-      <div className="mb-4 px-1">
-        <CampaignTimeline steps={timelineSteps} currentStep={run.currentStepIndex} />
-      </div>
-
-      {/* Pause offer alert */}
-      {run.pauseOfferSent && run.pauseOfferStatus === "pending" && (
-        <PauseOfferBadge runId={run.id} status={run.pauseOfferStatus} onAction={onPauseOffer} />
-      )}
-
-      {/* Footer */}
-      <div className={cn("flex items-center justify-between pt-3 border-t border-border", run.pauseOfferSent && run.pauseOfferStatus === "pending" ? "mt-3" : "")}>
-        <span className={cn("text-[10px] text-rx-text-muted", dmSans.className)}>
-          Started {timeAgo(run.createdAt)}
-        </span>
-        {run.status === "recovered" && (
-          <span className="flex items-center gap-1 text-[10px] text-rx-green">
-            <Check size={11} strokeWidth={2.5} /> Recovered
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
 
 function PaydayAlertsBanner({ alerts, onDismiss }: { alerts: PaydayAlert[]; onDismiss: () => void }) {
   if (alerts.length === 0) return null;
@@ -370,29 +303,363 @@ function NewTemplateModal({
   );
 }
 
-function EmptyState({ plan, onNew }: { plan: PlanName; onNew: () => void }) {
-  const canCreate = planLimits[plan]?.canCreate;
+
+// ─── Active Strategy Card ─────────────────────────────────────────────────────
+
+function ActiveStrategyCard({
+  template,
+  isEffectivelyActive,
+  campaignsPaused,
+  plan,
+  onTogglePause,
+  onToggleTemplatePause,
+  actionLoading,
+}: {
+  template: CampaignTemplate;
+  isEffectivelyActive: boolean;
+  campaignsPaused: boolean;
+  plan: PlanName;
+  onTogglePause: () => void;
+  onToggleTemplatePause: (templateId: string, isPaused: boolean) => void;
+  actionLoading: boolean;
+}) {
+  const isSystemDefault = template.type === "system_default";
+  const canControl = plan === "growth" || plan === "scale";
+
+  const timelineSteps: TimelineStep[] = template.steps.map((s) => ({
+    day: `Day ${s.dayOffset}`,
+    channels: [s.preferredChannel],
+  }));
+
+  const recoveryRate = template.stats.totalRuns > 0
+    ? Math.round((template.stats.recoveredRuns / template.stats.totalRuns) * 100)
+    : null;
+
+  let badgeText: string;
+  let badgeClass: string;
+  if (campaignsPaused) {
+    badgeText = "Paused";
+    badgeClass = "bg-rx-amber-dim text-rx-amber";
+  } else if (isEffectivelyActive) {
+    badgeText = "Active";
+    badgeClass = "bg-rx-green-dim text-rx-green";
+  } else {
+    badgeText = "Fallback";
+    badgeClass = "bg-rx-overlay text-rx-text-muted";
+  }
+
   return (
-    <div className="flex flex-col items-center justify-center py-20 text-center">
-      <div className="w-12 h-12 rounded-full bg-rx-overlay flex items-center justify-center mb-4">
-        <Zap size={20} className="text-rx-text-muted" />
+    <div className={cn(
+      "bg-rx-surface border rounded-2xl p-5 transition-all",
+      isEffectivelyActive && !campaignsPaused ? "border-rx-green/30" : "border-border"
+    )}>
+      <div className="flex items-start justify-between mb-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap mb-0.5">
+            <h3 className={cn("font-semibold text-sm text-rx-text-primary", plusJakarta.className)}>
+              {template.name}
+            </h3>
+            <span className={cn("text-[10px] px-1.5 py-0.5 rounded-md font-medium", badgeClass)}>
+              {badgeText}
+            </span>
+            {isSystemDefault && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-rx-overlay text-rx-text-muted">
+                System default
+              </span>
+            )}
+          </div>
+          <p className={cn("text-[11px] text-rx-text-muted", dmSans.className)}>
+            {template.steps.length} steps
+            {template.steps.some((s) => s.isPauseOffer) && " · includes pause offer"}
+          </p>
+        </div>
+
+        {/* Control buttons — Growth/Scale only */}
+        {canControl && (
+          <div className="flex items-center gap-1.5 ml-3 shrink-0">
+            {/* For merchant master templates: toggle the template itself */}
+            {!isSystemDefault && (
+              <button
+                disabled={actionLoading}
+                onClick={() => onToggleTemplatePause(template.id, !template.isPaused)}
+                className={cn(
+                  "flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg font-medium transition-colors",
+                  template.isPaused
+                    ? "bg-rx-green/10 text-rx-green hover:bg-rx-green/20"
+                    : "bg-rx-overlay text-rx-text-secondary hover:bg-rx-overlay/80"
+                )}
+              >
+                {actionLoading ? <Loader2 size={11} className="animate-spin" /> : template.isPaused ? <Play size={11} /> : <Pause size={11} />}
+                {template.isPaused ? "Activate" : "Pause"}
+              </button>
+            )}
+            {/* Global pause toggle (system default card) */}
+            {isSystemDefault && (
+              <button
+                disabled={actionLoading}
+                onClick={onTogglePause}
+                className={cn(
+                  "flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg font-medium transition-colors",
+                  campaignsPaused
+                    ? "bg-rx-green/10 text-rx-green hover:bg-rx-green/20"
+                    : "bg-rx-overlay text-rx-text-secondary hover:bg-rx-overlay/80"
+                )}
+              >
+                {actionLoading ? <Loader2 size={11} className="animate-spin" /> : campaignsPaused ? <Play size={11} /> : <Pause size={11} />}
+                {campaignsPaused ? "Resume campaigns" : "Pause campaigns"}
+              </button>
+            )}
+          </div>
+        )}
       </div>
-      <h3 className={cn("text-base font-semibold text-rx-text-primary mb-2", plusJakarta.className)}>
-        No active campaigns
-      </h3>
-      <p className={cn("text-sm text-rx-text-muted mb-6 max-w-xs", dmSans.className)}>
-        {canCreate
-          ? "Create your first custom campaign template to start recovering failed payments automatically."
-          : "Campaigns run automatically based on the system default sequence for your plan. Upgrade to Growth or Scale to customise."}
-      </p>
-      {canCreate && (
-        <button
-          onClick={onNew}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-rx-blue text-sm font-semibold text-white hover:opacity-90 transition-opacity"
-        >
-          <Plus size={14} /> New campaign
-        </button>
+
+      {/* Timeline */}
+      {timelineSteps.length > 0 && (
+        <div className="mb-4 px-1">
+          <CampaignTimeline steps={timelineSteps} currentStep={-1} />
+        </div>
       )}
+
+      {/* Stats row */}
+      {template.stats.totalRuns > 0 ? (
+        <div className="flex items-center gap-4 text-[11px] pt-3 border-t border-border">
+          <span className={cn("text-rx-text-muted", dmSans.className)}>
+            <span className={cn("font-semibold text-rx-text-secondary", jetbrains.className)}>
+              {template.stats.totalRuns}
+            </span> total runs
+          </span>
+          <span className="text-rx-text-muted">·</span>
+          <span className={cn("text-rx-text-muted", dmSans.className)}>
+            <span className={cn("font-semibold text-rx-green-text", jetbrains.className)}>
+              {template.stats.recoveredRuns}
+            </span> recovered
+          </span>
+          {recoveryRate !== null && (
+            <>
+              <span className="text-rx-text-muted">·</span>
+              <span className={cn("font-semibold text-rx-green-text", jetbrains.className)}>
+                {recoveryRate}% rate
+              </span>
+            </>
+          )}
+          {template.stats.activeRuns > 0 && (
+            <>
+              <span className="text-rx-text-muted">·</span>
+              <span className={cn("text-rx-text-muted", dmSans.className)}>
+                <span className={cn("font-semibold text-rx-blue", jetbrains.className)}>
+                  {template.stats.activeRuns}
+                </span> in progress
+              </span>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="pt-3 border-t border-border">
+          <p className={cn("text-[11px] text-rx-text-muted", dmSans.className)}>
+            No runs yet — campaigns start automatically on new payment failures.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Compact run row ──────────────────────────────────────────────────────────
+
+function RunRow({
+  run,
+  onPauseOffer,
+  actionLoading,
+}: {
+  run: CampaignRun;
+  onPauseOffer: (runId: string, action: "approve" | "reject") => void;
+  actionLoading: string | null;
+}) {
+  const customerDisplay = run.customerName || run.customerEmail || "Unknown customer";
+  const amount = formatAmount(run.amountPaise, run.currency);
+
+  return (
+    <div className={cn(
+      "flex items-center justify-between py-3 px-4 rounded-xl bg-rx-surface border border-border",
+      actionLoading === run.id ? "opacity-60" : ""
+    )}>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 mb-0.5">
+          <span className={cn("text-sm font-medium text-rx-text-primary truncate", plusJakarta.className)}>
+            {customerDisplay}
+          </span>
+          <span className={cn("text-[10px] px-1.5 py-0.5 rounded-md shrink-0", statusStyle[run.status])}>
+            {statusLabel[run.status]}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className={cn("font-semibold text-rx-green-text", jetbrains.className)}>{amount}</span>
+          <span className="text-rx-text-muted">·</span>
+          <span className={cn("text-rx-text-muted", dmSans.className)}>
+            Step {run.currentStep}/{run.totalSteps}
+          </span>
+          <span className="text-rx-text-muted">·</span>
+          <span className={cn("text-rx-text-muted", dmSans.className)}>{timeAgo(run.startedAt)}</span>
+        </div>
+      </div>
+      {/* Pause offer inline */}
+      {run.pauseOfferSent && run.pauseOfferStatus === "pending" && (
+        <div className="flex items-center gap-1.5 ml-3 shrink-0">
+          <span className="text-[10px] text-rx-amber flex items-center gap-1">
+            <Bell size={10} /> Pause req.
+          </span>
+          <button
+            onClick={() => onPauseOffer(run.id, "approve")}
+            className="text-[10px] px-2 py-0.5 rounded bg-rx-green/20 text-rx-green font-semibold hover:bg-rx-green/30 transition-colors"
+          >
+            ✓
+          </button>
+          <button
+            onClick={() => onPauseOffer(run.id, "reject")}
+            className="text-[10px] px-2 py-0.5 rounded bg-rx-overlay text-rx-text-muted font-semibold hover:bg-rx-overlay/80 transition-colors"
+          >
+            ✗
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Campaign Runs tab ────────────────────────────────────────────────────────
+
+function CampaignRunsTab({
+  templates,
+  runs,
+  merchant,
+  plan,
+  onNew,
+  onTogglePause,
+  onToggleTemplatePause,
+  onPauseOffer,
+  actionLoading,
+  strategyLoading,
+}: {
+  templates: CampaignTemplate[];
+  runs: CampaignRun[];
+  merchant: MerchantInfo | null;
+  plan: PlanName;
+  onNew: () => void;
+  onTogglePause: () => void;
+  onToggleTemplatePause: (templateId: string, isPaused: boolean) => void;
+  onPauseOffer: (runId: string, action: "approve" | "reject") => void;
+  actionLoading: string | null;
+  strategyLoading: boolean;
+}) {
+  const campaignsPaused = merchant?.campaignsPaused ?? false;
+  const canControl = plan === "growth" || plan === "scale";
+
+  // System default for the merchant's plan (first match)
+  const systemDefault = templates.find((t) => t.type === "system_default" && t.planRequired === plan)
+    ?? templates.find((t) => t.type === "system_default");
+
+  // Merchant master templates
+  const merchantMasters = templates.filter((t) => t.type === "merchant_master");
+
+  // The "effectively active" template is the first non-paused merchant master, or system default
+  const activeMerchantMaster = merchantMasters.find((t) => !t.isPaused && t.isActive);
+  const effectiveActiveId = activeMerchantMaster?.id ?? systemDefault?.id;
+
+  return (
+    <div className="space-y-6">
+      {/* ── Strategy section ── */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className={cn("text-sm font-semibold text-rx-text-secondary", plusJakarta.className)}>
+            Active Campaign Strategy
+          </h2>
+          {canControl && merchantMasters.length === 0 && (
+            <button
+              onClick={onNew}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-rx-blue/10 text-rx-blue hover:bg-rx-blue/20 transition-colors font-medium"
+            >
+              <Zap size={12} /> Use custom campaign
+            </button>
+          )}
+        </div>
+
+        <div className="space-y-3">
+          {/* Merchant master(s) — shown first if they exist */}
+          {merchantMasters.map((t) => (
+            <ActiveStrategyCard
+              key={t.id}
+              template={t}
+              isEffectivelyActive={t.id === effectiveActiveId}
+              campaignsPaused={campaignsPaused}
+              plan={plan}
+              onTogglePause={onTogglePause}
+              onToggleTemplatePause={onToggleTemplatePause}
+              actionLoading={strategyLoading}
+            />
+          ))}
+
+          {/* System default — always shown */}
+          {systemDefault && (
+            <ActiveStrategyCard
+              key={systemDefault.id}
+              template={systemDefault}
+              isEffectivelyActive={systemDefault.id === effectiveActiveId}
+              campaignsPaused={campaignsPaused}
+              plan={plan}
+              onTogglePause={onTogglePause}
+              onToggleTemplatePause={onToggleTemplatePause}
+              actionLoading={strategyLoading}
+            />
+          )}
+
+          {/* No templates at all */}
+          {!systemDefault && merchantMasters.length === 0 && (
+            <div className="rounded-xl border border-dashed border-border p-8 text-center">
+              <p className={cn("text-sm text-rx-text-muted", dmSans.className)}>
+                System default templates are loading. Refresh in a moment.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Upgrade prompt for trial/starter */}
+        {!canControl && (
+          <p className={cn("text-[11px] text-rx-text-muted mt-3", dmSans.className)}>
+            Upgrade to Growth or Scale to create custom campaigns or pause recovery sequences.
+          </p>
+        )}
+      </div>
+
+      {/* ── Recent runs section ── */}
+      <div>
+        <h2 className={cn("text-sm font-semibold text-rx-text-secondary mb-3", plusJakarta.className)}>
+          Recent Campaign Runs
+          {runs.length > 0 && (
+            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-rx-overlay text-rx-text-muted font-normal">
+              {runs.length}
+            </span>
+          )}
+        </h2>
+
+        {runs.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border p-8 text-center">
+            <p className={cn("text-sm text-rx-text-muted", dmSans.className)}>
+              No campaign runs yet. Runs start automatically when a new payment failure is received.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {runs.map((run) => (
+              <RunRow
+                key={run.id}
+                run={run}
+                onPauseOffer={onPauseOffer}
+                actionLoading={actionLoading}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -410,6 +677,7 @@ export default function CampaignsPage() {
   const [showPaydayBanner, setShowPaydayBanner] = useState(true);
   const [activeTab, setActiveTab] = useState<"runs" | "templates">("runs");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [strategyLoading, setStrategyLoading] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -437,18 +705,38 @@ export default function CampaignsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  async function handlePauseToggle(runId: string, currentStatus: RunStatus) {
-    setActionLoading(runId);
+  async function handleToggleCampaignsPaused() {
+    if (!merchant) return;
+    setStrategyLoading(true);
     try {
-      // Toggle pause via the campaign runs endpoint (not yet implemented — placeholder)
-      await fetch(`/api/dashboard/campaigns/runs/${runId}/pause-offer`, {
-        method: "POST",
+      const res = await fetch("/api/dashboard/campaigns/settings", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: currentStatus === "paused" ? "reject" : "approve" }),
+        body: JSON.stringify({ campaignsPaused: !merchant.campaignsPaused }),
       });
-      await fetchData();
+      if (res.ok) {
+        setMerchant((m) => m ? { ...m, campaignsPaused: !m.campaignsPaused } : m);
+      }
     } finally {
-      setActionLoading(null);
+      setStrategyLoading(false);
+    }
+  }
+
+  async function handleToggleTemplatePause(templateId: string, isPaused: boolean) {
+    setStrategyLoading(true);
+    try {
+      const res = await fetch(`/api/dashboard/campaigns/templates/${templateId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isPaused }),
+      });
+      if (res.ok) {
+        setTemplates((prev) => prev.map((t) =>
+          t.id === templateId ? { ...t, isPaused } : t
+        ));
+      }
+    } finally {
+      setStrategyLoading(false);
     }
   }
 
@@ -466,7 +754,7 @@ export default function CampaignsPage() {
     }
   }
 
-  const plan = merchant?.plan ?? "starter";
+  const plan = (merchant?.plan ?? "starter") as PlanName;
   const canCreateTemplate = planLimits[plan]?.canCreate;
   const pendingPauseOffers = runs.filter(
     (r) => r.pauseOfferSent && r.pauseOfferStatus === "pending"
@@ -550,30 +838,25 @@ export default function CampaignsPage() {
 
       {/* Campaign runs tab */}
       {!loading && !error && activeTab === "runs" && (
-        <>
-          {runs.length === 0 ? (
-            <EmptyState plan={plan as PlanName} onNew={() => setShowNewModal(true)} />
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {runs.map((run) => (
-                <div key={run.id} className={cn(actionLoading === run.id ? "opacity-60 pointer-events-none" : "")}>
-                  <CampaignRunCard
-                    run={run}
-                    onPauseToggle={handlePauseToggle}
-                    onPauseOffer={handlePauseOffer}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-        </>
+        <CampaignRunsTab
+          templates={templates}
+          runs={runs}
+          merchant={merchant}
+          plan={plan}
+          onNew={() => setShowNewModal(true)}
+          onTogglePause={handleToggleCampaignsPaused}
+          onToggleTemplatePause={handleToggleTemplatePause}
+          onPauseOffer={handlePauseOffer}
+          actionLoading={actionLoading}
+          strategyLoading={strategyLoading}
+        />
       )}
 
       {/* Templates tab */}
       {!loading && !error && activeTab === "templates" && (
         <TemplatesTab
           templates={templates}
-          plan={plan as PlanName}
+          plan={plan}
           onNew={() => setShowNewModal(true)}
         />
       )}
@@ -581,10 +864,10 @@ export default function CampaignsPage() {
       {/* New template modal */}
       {showNewModal && (
         <NewTemplateModal
-          plan={plan as PlanName}
+          plan={plan}
           onClose={() => setShowNewModal(false)}
           onCreated={(t) => {
-            setTemplates((prev) => [...prev, t]);
+            setTemplates((prev) => [...prev, t as unknown as CampaignTemplate]);
             setShowNewModal(false);
             setActiveTab("templates");
           }}

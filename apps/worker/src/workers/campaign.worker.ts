@@ -196,6 +196,20 @@ async function handleScheduleCampaign(
   const data = job.data;
   console.log(`[CampaignWorker] Scheduling campaign for payment ${data.failedPaymentId}`);
 
+  // ── 0. Check if merchant has paused campaigns ───────────────────────────
+  const merchantPauseRow = await db
+    .select({ campaignsPaused: merchants.campaignsPaused })
+    .from(merchants)
+    .where(eq(merchants.id, data.merchantId))
+    .limit(1);
+
+  if (merchantPauseRow[0]?.campaignsPaused) {
+    console.log(
+      `[CampaignWorker] Campaigns paused for merchant ${data.merchantId} — skipping schedule`
+    );
+    return;
+  }
+
   // ── 1. Concurrent-failure dedup check ──────────────────────────────────
   const existingRun = await campaignQueries.getActiveRunForCustomer(db, data.customerId);
 

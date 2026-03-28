@@ -305,6 +305,31 @@ export const campaignQueries = {
   },
 
   /**
+   * Returns aggregate stats for a campaign template: how many runs, how many
+   * recovered, how many currently active. Used on the dashboard strategy card.
+   */
+  getCampaignTemplateStats: async (
+    db: Database,
+    merchantId: string,
+    templateId: string
+  ) => {
+    const rows = await db
+      .select({
+        totalRuns: sql<number>`count(*)::int`,
+        recoveredRuns: sql<number>`count(*) filter (where status = 'recovered')::int`,
+        activeRuns: sql<number>`count(*) filter (where status = 'active')::int`,
+      })
+      .from(campaignRuns)
+      .where(
+        and(
+          eq(campaignRuns.merchantId, merchantId),
+          eq(campaignRuns.campaignTemplateId, templateId)
+        )
+      );
+    return rows[0] ?? { totalRuns: 0, recoveredRuns: 0, activeRuns: 0 };
+  },
+
+  /**
    * Counts how many active master campaigns a merchant has.
    * Used to enforce the Growth (max 1) and Scale (max 5) campaign limits.
    */
