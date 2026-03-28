@@ -605,9 +605,6 @@ function TemplatesTab({
   plan: PlanName;
   onNew: () => void;
 }) {
-  const plusJakartaInner = Plus_Jakarta_Sans({ subsets: ["latin"], weight: ["500", "600", "700"] });
-  const dmSansInner = DM_Sans({ subsets: ["latin"], weight: ["400", "500"] });
-
   const merchantTemplates = templates.filter((t) => t.type === "merchant_master");
   const systemTemplates = templates.filter((t) => t.type === "system_default");
 
@@ -616,7 +613,7 @@ function TemplatesTab({
       {/* Merchant templates */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h2 className={cn("text-sm font-semibold text-rx-text-primary", plusJakartaInner.className)}>
+          <h2 className={cn("text-sm font-semibold text-rx-text-primary", plusJakarta.className)}>
             Custom Templates
           </h2>
           {planLimits[plan]?.canCreate && merchantTemplates.length < planLimits[plan].maxTemplates && (
@@ -631,7 +628,7 @@ function TemplatesTab({
 
         {merchantTemplates.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border p-8 text-center">
-            <p className={cn("text-sm text-rx-text-muted mb-3", dmSansInner.className)}>
+            <p className={cn("text-sm text-rx-text-muted mb-3", dmSans.className)}>
               {planLimits[plan]?.canCreate
                 ? "No custom templates yet. Create one to override the system defaults."
                 : "Upgrade to Growth or Scale to create custom campaign templates."}
@@ -657,7 +654,7 @@ function TemplatesTab({
       {/* System templates */}
       {systemTemplates.length > 0 && (
         <div>
-          <h2 className={cn("text-sm font-semibold text-rx-text-primary mb-3", plusJakartaInner.className)}>
+          <h2 className={cn("text-sm font-semibold text-rx-text-primary mb-3", plusJakarta.className)}>
             System Defaults
           </h2>
           <div className="space-y-3">
@@ -680,9 +677,6 @@ function TemplateCard({
   plan: PlanName;
   readOnly?: boolean;
 }) {
-  const plusJakartaInner = Plus_Jakarta_Sans({ subsets: ["latin"], weight: ["500", "600", "700"] });
-  const dmSansInner = DM_Sans({ subsets: ["latin"], weight: ["400", "500"] });
-
   const timelineSteps: TimelineStep[] = template.steps
     .sort((a, b) => a.stepNumber - b.stepNumber)
     .map((s) => ({
@@ -700,7 +694,7 @@ function TemplateCard({
       <div className="flex items-start justify-between mb-4">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className={cn("font-semibold text-sm text-rx-text-primary", plusJakartaInner.className)}>
+            <h3 className={cn("font-semibold text-sm text-rx-text-primary", plusJakarta.className)}>
               {template.name}
             </h3>
             {readOnly && (
@@ -714,7 +708,7 @@ function TemplateCard({
               </span>
             )}
           </div>
-          <p className={cn("text-[11px] text-rx-text-muted mt-0.5", dmSansInner.className)}>
+          <p className={cn("text-[11px] text-rx-text-muted mt-0.5", dmSans.className)}>
             {template.steps.length} step{template.steps.length !== 1 ? "s" : ""}
             {channelCounts.email ? ` · ${channelCounts.email} email` : ""}
             {channelCounts.whatsapp ? ` · ${channelCounts.whatsapp} WhatsApp` : ""}
