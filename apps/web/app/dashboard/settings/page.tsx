@@ -98,10 +98,11 @@ const DEFAULT_MERCHANT_DATA = {
     msg91ApiKey: null as string | null,
     msg91SenderId: null as string | null,
     dltRegistered: false,
-    slackWebhookUrl: 'https://hooks.slack.com/services/T00/B00/xxx',
+    slackWebhookUrl: '',
     notifyOnRecovery: true,
     digestFrequency: 'daily' as DigestFrequency,
     digestEmail: 'rahul@acmesaas.in',
+    defaultCampaignPreference: 'standard_10d',
   },
   gateways: [
     { id: 'gwc_001', gateway: 'razorpay', status: 'connected', gatewayMerchantId: 'acc_Pq8NxRyT2abc', gatewayAccountName: 'Acme Technologies', lastWebhookReceivedAt: '2025-03-21T14:02:11Z', consecutiveWebhookFailures: 0, canReadSubscriptions: true, canRetryPayments: true, tokenExpiresAt: null, connectedAt: '2024-10-15' },
@@ -578,38 +579,223 @@ function BusinessSection({ setHasChanges }: { setHasChanges: (v: boolean) => voi
 }
 
 // ─── Email Preview ────────────────────────────────────────────────────────────
-function EmailPreview({ fromName, fromEmail, brandColor, tagline, template }: {
-  fromName: string; fromEmail: string; brandColor: string; tagline: string; template: 1 | 2 | 3;
+
+/** Substitutes {{variable}} placeholders with preview values */
+function substituteVars(text: string, vars: Record<string, string>): string {
+  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`);
+}
+
+function EmailPreview({ fromName, fromEmail, brandColor, subject, bodyText, companyName }: {
+  fromName: string; fromEmail: string; brandColor: string;
+  subject: string; bodyText: string; companyName: string;
 }) {
-  const previews = {
-    1: { subject: 'Action required: Payment failed', body: 'We were unable to process your ₹4,299 payment for the Growth plan. This sometimes happens when a card expires or funds are temporarily unavailable.' },
-    2: { subject: 'Reminder: Your access may be paused', body: 'Your Growth plan access may be paused soon. Please update your payment details to continue enjoying uninterrupted service.' },
-    3: { subject: 'Final notice: Payment still pending', body: 'This is your final reminder about the payment for your Growth plan. Please update your details within 24 hours to avoid service interruption.' },
+  const vars = {
+    customer_name: 'Priya',
+    amount: '₹2,499',
+    merchant_name: companyName || fromName || 'Your Company',
+    payment_link: '#',
+    product_name: companyName || 'your subscription',
+    brand_color: brandColor,
   };
-  const p = previews[template];
+  const subjectDisplay = substituteVars(subject, vars);
+  const bodyDisplay = substituteVars(bodyText, vars);
+  const initial = (companyName || fromName || 'A')[0].toUpperCase();
+
   return (
     <div className="border border-border rounded-lg overflow-hidden text-[13px]" style={{ fontFamily: 'sans-serif' }}>
       <div className="px-5 py-3 flex items-center gap-3" style={{ background: brandColor }}>
-        <div className="w-8 h-8 rounded bg-white/20 flex items-center justify-center text-white font-bold text-[14px]">A</div>
-        <span className="text-white font-semibold">AcmeSaaS</span>
+        <div className="w-8 h-8 rounded bg-white/20 flex items-center justify-center text-white font-bold text-[14px]">{initial}</div>
+        <span className="text-white font-semibold">{companyName || fromName}</span>
       </div>
       <div className="bg-white px-6 py-5 text-[#1a1a1a]">
-        <p className="font-semibold mb-3">{p.subject}</p>
-        <p className="text-[#444] mb-1">Hi [Customer Name],</p>
-        <p className="text-[#444] mb-4">{p.body}</p>
+        <p className="font-semibold mb-3 text-[#1a1a1a]">{subjectDisplay}</p>
+        <div className="text-[#444] mb-4 text-[13px] leading-relaxed whitespace-pre-line">{bodyDisplay}</div>
         <div className="mb-4">
           <span className="inline-block px-5 py-2 rounded-lg text-white text-[13px] font-semibold" style={{ background: brandColor }}>
             Update payment method →
           </span>
         </div>
-        <p className="text-[#888] text-[12px]">If you believe this is an error, simply reply to this email.</p>
       </div>
       <div className="bg-[#f4f4f4] px-6 py-3 text-[11px] text-[#888] border-t border-[#e0e0e0]">
         <p>{fromName} · {fromEmail}</p>
-        <p className="mt-0.5">{tagline}</p>
         <p className="mt-0.5">Unsubscribe</p>
       </div>
     </div>
+  );
+}
+
+// ─── Email Templates Card ─────────────────────────────────────────────────────
+
+interface EmailStep {
+  id: string;
+  stepNumber: number;
+  dayOffset: number;
+  isPauseOffer: boolean;
+  messages: {
+    email: { subject: string | null; bodyText: string | null } | null;
+  };
+}
+
+function EmailTemplatesCard({
+  fromName, fromEmail, brandColor, companyName, setHasChanges,
+}: {
+  fromName: string; fromEmail: string; brandColor: string; companyName: string; setHasChanges: (v: boolean) => void;
+}) {
+  const [steps, setSteps] = useState<EmailStep[]>([]);
+  const [edits, setEdits] = useState<Record<number, { subject: string; bodyText: string }>>({});
+  const [loading, setLoading] = useState(true);
+  const [activeStep, setActiveStep] = useState(1);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [isOverride, setIsOverride] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/settings/merchant/email-templates')
+      .then(r => r.json())
+      .then(data => {
+        if (data.steps) {
+          setSteps(data.steps);
+          setIsOverride(data.isOverride ?? false);
+          // Initialise edit state from fetched content
+          const initial: Record<number, { subject: string; bodyText: string }> = {};
+          for (const s of data.steps) {
+            initial[s.stepNumber] = {
+              subject: s.messages?.email?.subject ?? '',
+              bodyText: s.messages?.email?.bodyText ?? '',
+            };
+          }
+          setEdits(initial);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSaveEmails = async () => {
+    setSaving(true);
+    try {
+      const overrides = Object.entries(edits).map(([stepNumber, e]) => ({
+        stepNumber: Number(stepNumber),
+        subject: e.subject,
+        bodyText: e.bodyText,
+      }));
+      const res = await fetch('/api/settings/merchant/email-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ overrides }),
+      });
+      if (res.ok) {
+        setSaved(true);
+        setIsOverride(true);
+        setTimeout(() => setSaved(false), 2000);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const currentStep = steps.find(s => s.stepNumber === activeStep);
+  const currentEdit = edits[activeStep] ?? { subject: '', bodyText: '' };
+
+  if (loading) {
+    return (
+      <Card>
+        <div className="animate-pulse space-y-3">
+          <div className="h-4 w-40 bg-rx-overlay rounded" />
+          <div className="h-32 w-full bg-rx-overlay rounded-lg" />
+        </div>
+      </Card>
+    );
+  }
+
+  if (steps.length === 0) {
+    return (
+      <Card>
+        <CardTitle>Email templates</CardTitle>
+        <p className="text-[13px] font-body text-rx-text-muted">
+          No email templates found. Run <code className="font-mono text-rx-blue">pnpm --filter @fynback/db seed</code> to seed system defaults.
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-[15px] font-heading font-semibold text-rx-text-primary">Email templates</h3>
+          <p className="text-[12px] font-body text-rx-text-muted mt-0.5">
+            {isOverride ? 'Using your customized templates' : 'Using system default templates — customize below'}
+          </p>
+        </div>
+        <div className="flex gap-1">
+          {steps.map(s => (
+            <button key={s.stepNumber} onClick={() => setActiveStep(s.stepNumber)}
+              className={cn('px-3 py-1 rounded-md text-[12px] font-body transition-colors',
+                activeStep === s.stepNumber
+                  ? 'text-rx-blue border-b-2 border-rx-blue bg-rx-blue-dim'
+                  : 'text-rx-text-muted hover:text-rx-text-secondary'
+              )}>
+              Email #{s.stepNumber}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {currentStep && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+          {/* Editor */}
+          <div className="space-y-3">
+            <p className="text-[11px] font-body text-rx-text-muted">
+              Sent on <span className="font-medium text-rx-text-secondary">Day {currentStep.dayOffset}</span>
+              {currentStep.isPauseOffer && ' · Includes pause offer'}
+            </p>
+            <FormField label="Subject line">
+              <Input
+                value={currentEdit.subject}
+                onChange={e => {
+                  setEdits(prev => ({ ...prev, [activeStep]: { ...currentEdit, subject: e.target.value } }));
+                  setHasChanges(true);
+                }}
+                placeholder="e.g. Action needed: Your payment couldn't be processed"
+              />
+            </FormField>
+            <FormField label="Email body" helper="Use {{customer_name}}, {{amount}}, {{merchant_name}}, {{payment_link}}">
+              <textarea
+                value={currentEdit.bodyText}
+                onChange={e => {
+                  setEdits(prev => ({ ...prev, [activeStep]: { ...currentEdit, bodyText: e.target.value } }));
+                  setHasChanges(true);
+                }}
+                rows={6}
+                className="w-full px-3.5 py-2.5 rounded-lg bg-rx-elevated border border-border text-[13px] font-mono text-rx-text-primary placeholder:text-rx-text-muted outline-none transition-all focus:border-rx-blue focus:ring-2 focus:ring-rx-blue/20 resize-y"
+                placeholder="Hi {{customer_name}},&#10;&#10;We couldn't process your payment of {{amount}}..."
+              />
+            </FormField>
+            <button
+              onClick={handleSaveEmails}
+              disabled={saving}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-rx-blue text-white text-[13px] font-body font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : saved ? '✓ Saved!' : 'Save email templates'}
+            </button>
+          </div>
+
+          {/* Live preview */}
+          <div>
+            <p className="text-[11px] font-body font-medium text-rx-text-muted mb-2">Live preview</p>
+            <EmailPreview
+              fromName={fromName}
+              fromEmail={fromEmail}
+              brandColor={brandColor}
+              subject={currentEdit.subject || '(no subject)'}
+              bodyText={currentEdit.bodyText || '(empty body)'}
+              companyName={companyName}
+            />
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -617,7 +803,7 @@ function BrandSection({ setHasChanges }: { setHasChanges: (v: boolean) => void }
   const [fromName, setFromName] = useState(merchantData.brand.fromName);
   const [brandColor, setBrandColor] = useState(merchantData.brand.brandColorHex);
   const [tagline, setTagline] = useState(merchantData.brand.companyTagline);
-  const [activeTemplate, setActiveTemplate] = useState<1 | 2 | 3>(1);
+  const [campaignPref, setCampaignPref] = useState(merchantData.brand.defaultCampaignPreference || 'standard_10d');
   const colorRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -625,11 +811,6 @@ function BrandSection({ setHasChanges }: { setHasChanges: (v: boolean) => void }
       <SectionHeader
         title="Brand & Email"
         subtitle="How fynback appears to your customers in recovery emails"
-        action={
-          <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-rx-blue text-[13px] font-body text-rx-blue hover:bg-rx-blue-dim transition-colors">
-            <Eye size={14} /> Preview email →
-          </button>
-        }
       />
 
       <Card>
@@ -637,13 +818,13 @@ function BrandSection({ setHasChanges }: { setHasChanges: (v: boolean) => void }
         <div className="space-y-5">
           <FormField label="Display name (From)" helper={`How your name appears in the inbox: '${fromName}'`}>
             <div className="relative">
-              <Input value={fromName} onChange={e => { setFromName(e.target.value); setHasChanges(true); }} className="pr-20" />
+              <Input value={fromName} onChange={e => { setFromName(e.target.value); merchantData.brand.fromName = e.target.value; setHasChanges(true); }} className="pr-20" />
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-body text-rx-text-muted">{fromName.length}/50</span>
             </div>
           </FormField>
           <FormField label="Sending email address">
             <div className="relative">
-              <Input defaultValue={merchantData.brand.fromEmail} onChange={() => setHasChanges(true)} className="pr-36" />
+              <Input defaultValue={merchantData.brand.fromEmail} onChange={e => { merchantData.brand.fromEmail = e.target.value; setHasChanges(true); }} className="pr-36" />
               <span className="absolute right-3 top-1/2 -translate-y-1/2"><Badge variant="green">Domain verified ✓</Badge></span>
             </div>
             <div className="mt-3 space-y-1.5 p-3 bg-rx-elevated rounded-lg border border-border">
@@ -662,7 +843,18 @@ function BrandSection({ setHasChanges }: { setHasChanges: (v: boolean) => void }
             </div>
           </FormField>
           <FormField label="Reply-to address (for customer replies)">
-            <Input defaultValue={merchantData.brand.replyToEmail} onChange={() => setHasChanges(true)} />
+            <Input defaultValue={merchantData.brand.replyToEmail} onChange={e => { merchantData.brand.replyToEmail = e.target.value; setHasChanges(true); }} />
+          </FormField>
+          <FormField label="Default recovery cadence" helper="The campaign sequence style selected during onboarding. Shows on your campaigns dashboard.">
+            <Select value={campaignPref} onChange={e => {
+              setCampaignPref(e.target.value);
+              merchantData.brand.defaultCampaignPreference = e.target.value;
+              setHasChanges(true);
+            }}>
+              <option value="aggressive_7d">Aggressive 7-day (7 days, high frequency)</option>
+              <option value="standard_10d">Standard 10-day (10 days, balanced)</option>
+              <option value="gentle_14d">Gentle 14-day (14 days, low pressure)</option>
+            </Select>
           </FormField>
         </div>
       </Card>
@@ -684,8 +876,8 @@ function BrandSection({ setHasChanges }: { setHasChanges: (v: boolean) => void }
                 className="w-10 h-10 rounded-lg border border-border shrink-0 transition-transform hover:scale-105"
                 style={{ background: brandColor }}
               />
-              <input ref={colorRef} type="color" value={brandColor} onChange={e => { setBrandColor(e.target.value); setHasChanges(true); }} className="sr-only" />
-              <Input value={brandColor} onChange={e => { setBrandColor(e.target.value); setHasChanges(true); }} className="w-32 font-mono" />
+              <input ref={colorRef} type="color" value={brandColor} onChange={e => { setBrandColor(e.target.value); merchantData.brand.brandColorHex = e.target.value; setHasChanges(true); }} className="sr-only" />
+              <Input value={brandColor} onChange={e => { setBrandColor(e.target.value); merchantData.brand.brandColorHex = e.target.value; setHasChanges(true); }} className="w-32 font-mono" />
             </div>
           </FormField>
           <FormField label="Email footer tagline (optional)" helper="Shown in small text at the bottom of all recovery emails">
@@ -694,24 +886,13 @@ function BrandSection({ setHasChanges }: { setHasChanges: (v: boolean) => void }
         </div>
       </Card>
 
-      <Card>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-[15px] font-heading font-semibold text-rx-text-primary">Email preview</h3>
-          <div className="flex gap-1">
-            {([1, 2, 3] as (1 | 2 | 3)[]).map(t => (
-              <button key={t} onClick={() => setActiveTemplate(t)}
-                className={cn('px-3 py-1 rounded-md text-[12px] font-body transition-colors', activeTemplate === t ? 'text-rx-blue border-b-2 border-rx-blue bg-rx-blue-dim' : 'text-rx-text-muted hover:text-rx-text-secondary')}>
-                Email #{t}
-              </button>
-            ))}
-          </div>
-        </div>
-        <EmailPreview fromName={fromName} fromEmail={merchantData.brand.fromEmail} brandColor={brandColor} tagline={tagline} template={activeTemplate} />
-        <p className="text-[12px] font-body text-rx-text-muted mt-3">
-          This is Email #{activeTemplate} — sent {activeTemplate === 1 ? 'immediately after failure' : activeTemplate === 2 ? 'on Day 5 if unpaid' : 'on Day 10 as final notice'}.{' '}
-          <a href="#" className="text-rx-blue hover:underline">Edit templates →</a>
-        </p>
-      </Card>
+      <EmailTemplatesCard
+        fromName={fromName}
+        fromEmail={merchantData.brand.fromEmail}
+        brandColor={brandColor}
+        companyName={merchantData.companyName}
+        setHasChanges={setHasChanges}
+      />
     </div>
   );
 }
@@ -1682,11 +1863,13 @@ export default function SettingsPage() {
             companyTagline: brand.companyTagline || DEFAULT_MERCHANT_DATA.brand.companyTagline,
             whatsappEnabled: brand.whatsappEnabled ?? false,
             whatsappSenderName: brand.whatsappSenderName || DEFAULT_MERCHANT_DATA.brand.whatsappSenderName,
+            // slackWebhookUrl is already decrypted by the API
             slackWebhookUrl: brand.slackWebhookUrl || '',
             digestEmail: brand.digestEmail || currentUserEmail || DEFAULT_MERCHANT_DATA.brand.digestEmail,
             digestFrequency: (brand.digestFrequency || 'daily') as DigestFrequency,
-            dltRegistered: brand.smsEnabled ?? false,
+            dltRegistered: brand.dltRegistered ?? false,
             smsEnabled: brand.smsEnabled ?? false,
+            defaultCampaignPreference: brand.defaultCampaignPreference || 'standard_10d',
           } : DEFAULT_MERCHANT_DATA.brand,
           gateways: gateways?.length
             ? gateways.map((gw: any) => ({
@@ -1721,9 +1904,34 @@ export default function SettingsPage() {
       .finally(() => setIsLoading(false));
   }, []);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setIsSaving(true);
-    setTimeout(() => { setIsSaving(false); setHasChanges(false); setShowToast(true); }, 1000);
+    try {
+      const res = await fetch('/api/settings/merchant', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fromName: merchantData.brand.fromName,
+          fromEmail: merchantData.brand.fromEmail,
+          replyToEmail: merchantData.brand.replyToEmail,
+          brandColorHex: merchantData.brand.brandColorHex,
+          defaultCampaignPreference: merchantData.brand.defaultCampaignPreference,
+          slackWebhookUrl: merchantData.brand.slackWebhookUrl,
+          whatsappEnabled: merchantData.brand.whatsappEnabled,
+          digestFrequency: merchantData.brand.digestFrequency,
+          companyName: merchantData.companyName,
+          websiteUrl: merchantData.websiteUrl,
+        }),
+      });
+      if (res.ok) {
+        setHasChanges(false);
+        setShowToast(true);
+      }
+    } catch {
+      // silently fall through — user can retry
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDiscard = () => setHasChanges(false);

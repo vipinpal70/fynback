@@ -20,7 +20,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   Zap, Pause, Play, X, Plus, Bell,
   Loader2, AlertTriangle, Sparkles, Calendar, RefreshCw,
-  Settings,
+  Settings, Mail, ChevronDown, ChevronUp, ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import CampaignTimeline, { type TimelineStep } from "@/components/dashboard/CampaignTimeline";
@@ -305,6 +305,138 @@ function NewTemplateModal({
 }
 
 
+// ─── Template Email Panel ─────────────────────────────────────────────────────
+
+interface EmailMsgData {
+  subject: string | null;
+  bodyText: string | null;
+}
+
+interface EmailStepData {
+  id: string;
+  stepNumber: number;
+  dayOffset: number;
+  isPauseOffer: boolean;
+  messages: { email: EmailMsgData | null; whatsapp: EmailMsgData | null; sms: EmailMsgData | null };
+}
+
+function substituteVars(text: string, companyName: string): string {
+  const vars: Record<string, string> = {
+    customer_name: "Priya",
+    amount: "₹2,499",
+    merchant_name: companyName || "Your Company",
+    payment_link: "https://pay.example.com/retry/abc123",
+    product_name: "Premium Plan",
+  };
+  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`);
+}
+
+function TemplateEmailsPanel({ companyName }: { companyName: string }) {
+  const [steps, setSteps] = useState<EmailStepData[]>([]);
+  const [activeStep, setActiveStep] = useState(0);
+  const [isOverride, setIsOverride] = useState(false);
+  const [loadingEmails, setLoadingEmails] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/settings/merchant/email-templates")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.steps) {
+          setSteps(data.steps);
+          setIsOverride(data.isOverride ?? false);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingEmails(false));
+  }, []);
+
+  if (loadingEmails) {
+    return (
+      <div className="mt-4 pt-4 border-t border-border flex items-center justify-center py-6">
+        <Loader2 size={16} className="animate-spin text-rx-text-muted" />
+      </div>
+    );
+  }
+
+  if (steps.length === 0) {
+    return (
+      <div className="mt-4 pt-4 border-t border-border">
+        <p className={cn("text-[11px] text-rx-text-muted text-center py-2", dmSans.className)}>
+          No email templates found.
+        </p>
+      </div>
+    );
+  }
+
+  const currentStep = steps[activeStep] ?? steps[0];
+  const emailMsg = currentStep?.messages?.email;
+
+  return (
+    <div className="mt-4 pt-4 border-t border-border space-y-3">
+      {/* Header row */}
+      <div className="flex items-center justify-between">
+        <span className={cn("text-[11px] font-medium text-rx-text-secondary", dmSans.className)}>
+          Email messages
+          {isOverride ? (
+            <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-md bg-rx-blue/10 text-rx-blue">Customized</span>
+          ) : (
+            <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-md bg-rx-overlay text-rx-text-muted">System default</span>
+          )}
+        </span>
+        <a
+          href="/dashboard/settings"
+          className={cn("flex items-center gap-1 text-[10px] text-rx-blue hover:opacity-80 transition-opacity", dmSans.className)}
+        >
+          {isOverride ? "Edit in Settings" : "Customize in Settings"} <ExternalLink size={9} />
+        </a>
+      </div>
+
+      {/* Step tabs */}
+      <div className="flex flex-wrap gap-1">
+        {steps.map((s, i) => (
+          <button
+            key={s.id}
+            onClick={() => setActiveStep(i)}
+            className={cn(
+              "text-[10px] px-2.5 py-1 rounded-md font-medium transition-colors",
+              activeStep === i
+                ? "bg-rx-blue text-white"
+                : "bg-rx-overlay text-rx-text-muted hover:text-rx-text-secondary"
+            )}
+          >
+            Day {s.dayOffset}
+            {s.isPauseOffer && " · ⏸"}
+          </button>
+        ))}
+      </div>
+
+      {/* Email content */}
+      {emailMsg ? (
+        <div className="rounded-lg bg-rx-bg border border-border overflow-hidden">
+          {/* Subject */}
+          <div className="px-3 py-2 border-b border-border bg-rx-overlay">
+            <span className={cn("text-[10px] text-rx-text-muted", dmSans.className)}>Subject: </span>
+            <span className={cn("text-[11px] text-rx-text-primary font-medium", dmSans.className)}>
+              {substituteVars(emailMsg.subject ?? "", companyName)}
+            </span>
+          </div>
+          {/* Body */}
+          <div className={cn(
+            "px-3 py-3 text-[11px] text-rx-text-secondary whitespace-pre-wrap leading-relaxed max-h-44 overflow-y-auto",
+            dmSans.className
+          )}>
+            {substituteVars(emailMsg.bodyText ?? "", companyName)}
+          </div>
+        </div>
+      ) : (
+        <p className={cn("text-[11px] text-rx-text-muted py-1", dmSans.className)}>
+          No email message for this step.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── Active Strategy Card ─────────────────────────────────────────────────────
 
 function ActiveStrategyCard({
@@ -312,6 +444,7 @@ function ActiveStrategyCard({
   isEffectivelyActive,
   campaignsPaused,
   plan,
+  companyName,
   onTogglePause,
   onToggleTemplatePause,
   actionLoading,
@@ -320,10 +453,12 @@ function ActiveStrategyCard({
   isEffectivelyActive: boolean;
   campaignsPaused: boolean;
   plan: PlanName;
+  companyName: string;
   onTogglePause: () => void;
   onToggleTemplatePause: (templateId: string, isPaused: boolean) => void;
   actionLoading: boolean;
 }) {
+  const [showEmails, setShowEmails] = useState(false);
   const isSystemDefault = template.type === "system_default";
   const canControl = plan === "growth" || plan === "scale";
 
@@ -453,14 +588,45 @@ function ActiveStrategyCard({
               </span>
             </>
           )}
+          {/* Spacer + email toggle */}
+          <span className="flex-1" />
+          <button
+            onClick={() => setShowEmails((v) => !v)}
+            className={cn(
+              "flex items-center gap-1 text-[10px] px-2 py-1 rounded-md font-medium transition-colors",
+              showEmails
+                ? "bg-rx-blue/10 text-rx-blue"
+                : "bg-rx-overlay text-rx-text-muted hover:text-rx-text-secondary"
+            )}
+          >
+            <Mail size={10} />
+            {showEmails ? "Hide emails" : "View emails"}
+            {showEmails ? <ChevronUp size={9} /> : <ChevronDown size={9} />}
+          </button>
         </div>
       ) : (
-        <div className="pt-3 border-t border-border">
+        <div className="flex items-center justify-between pt-3 border-t border-border">
           <p className={cn("text-[11px] text-rx-text-muted", dmSans.className)}>
             No runs yet — campaigns start automatically on new payment failures.
           </p>
+          <button
+            onClick={() => setShowEmails((v) => !v)}
+            className={cn(
+              "flex items-center gap-1 text-[10px] px-2 py-1 rounded-md font-medium transition-colors shrink-0",
+              showEmails
+                ? "bg-rx-blue/10 text-rx-blue"
+                : "bg-rx-overlay text-rx-text-muted hover:text-rx-text-secondary"
+            )}
+          >
+            <Mail size={10} />
+            {showEmails ? "Hide emails" : "View emails"}
+            {showEmails ? <ChevronUp size={9} /> : <ChevronDown size={9} />}
+          </button>
         </div>
       )}
+
+      {/* Email panel */}
+      {showEmails && <TemplateEmailsPanel companyName={companyName} />}
     </div>
   );
 }
@@ -614,6 +780,7 @@ function CampaignRunsTab({
               isEffectivelyActive={t.id === effectiveActiveId}
               campaignsPaused={campaignsPaused}
               plan={plan}
+              companyName={merchant?.companyName ?? ""}
               onTogglePause={onTogglePause}
               onToggleTemplatePause={onToggleTemplatePause}
               actionLoading={strategyLoading}
@@ -628,6 +795,7 @@ function CampaignRunsTab({
               isEffectivelyActive={systemDefault.id === effectiveActiveId}
               campaignsPaused={campaignsPaused}
               plan={plan}
+              companyName={merchant?.companyName ?? ""}
               onTogglePause={onTogglePause}
               onToggleTemplatePause={onToggleTemplatePause}
               actionLoading={strategyLoading}
