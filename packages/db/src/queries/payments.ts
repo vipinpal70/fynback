@@ -163,8 +163,36 @@ export const paymentQueries = {
     limit: number = 10,
     offset: number = 0
   ) => {
+    // Explicit column list — avoids selecting new nullable columns (e.g. activeCampaignRunId)
+    // that may not yet exist in the production DB when a schema migration is pending.
     return db
-      .select()
+      .select({
+        id: failedPayments.id,
+        merchantId: failedPayments.merchantId,
+        gatewayConnectionId: failedPayments.gatewayConnectionId,
+        gatewayName: failedPayments.gatewayName,
+        gatewayEventId: failedPayments.gatewayEventId,
+        gatewayPaymentId: failedPayments.gatewayPaymentId,
+        gatewayOrderId: failedPayments.gatewayOrderId,
+        gatewaySubscriptionId: failedPayments.gatewaySubscriptionId,
+        gatewayCustomerId: failedPayments.gatewayCustomerId,
+        customerEmail: failedPayments.customerEmail,
+        customerPhone: failedPayments.customerPhone,
+        customerName: failedPayments.customerName,
+        amountPaise: failedPayments.amountPaise,
+        currency: failedPayments.currency,
+        paymentMethodType: failedPayments.paymentMethodType,
+        declineCode: failedPayments.declineCode,
+        declineCategory: failedPayments.declineCategory,
+        isRecoverable: failedPayments.isRecoverable,
+        status: failedPayments.status,
+        retryCount: failedPayments.retryCount,
+        maxRetries: failedPayments.maxRetries,
+        recoveredAmountPaise: failedPayments.recoveredAmountPaise,
+        failedAt: failedPayments.failedAt,
+        createdAt: failedPayments.createdAt,
+        updatedAt: failedPayments.updatedAt,
+      })
       .from(failedPayments)
       .where(eq(failedPayments.merchantId, merchantId))
       .orderBy(desc(failedPayments.failedAt))
@@ -178,7 +206,34 @@ export const paymentQueries = {
    */
   getFailedPaymentById: async (db: Database, id: string) => {
     const rows = await db
-      .select()
+      .select({
+        id: failedPayments.id,
+        merchantId: failedPayments.merchantId,
+        gatewayConnectionId: failedPayments.gatewayConnectionId,
+        gatewayName: failedPayments.gatewayName,
+        gatewayEventId: failedPayments.gatewayEventId,
+        gatewayPaymentId: failedPayments.gatewayPaymentId,
+        gatewayOrderId: failedPayments.gatewayOrderId,
+        gatewaySubscriptionId: failedPayments.gatewaySubscriptionId,
+        gatewayCustomerId: failedPayments.gatewayCustomerId,
+        customerEmail: failedPayments.customerEmail,
+        customerPhone: failedPayments.customerPhone,
+        customerName: failedPayments.customerName,
+        amountPaise: failedPayments.amountPaise,
+        currency: failedPayments.currency,
+        paymentMethodType: failedPayments.paymentMethodType,
+        declineCode: failedPayments.declineCode,
+        declineCategory: failedPayments.declineCategory,
+        isRecoverable: failedPayments.isRecoverable,
+        status: failedPayments.status,
+        retryCount: failedPayments.retryCount,
+        maxRetries: failedPayments.maxRetries,
+        recoveredAmountPaise: failedPayments.recoveredAmountPaise,
+        failedAt: failedPayments.failedAt,
+        rawPayload: failedPayments.rawPayload,
+        createdAt: failedPayments.createdAt,
+        updatedAt: failedPayments.updatedAt,
+      })
       .from(failedPayments)
       .where(eq(failedPayments.id, id))
       .limit(1);
