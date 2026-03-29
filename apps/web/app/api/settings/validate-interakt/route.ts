@@ -34,8 +34,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ valid: false, message: 'No API key provided' }, { status: 400 });
   }
 
-  // Interakt uses HTTP Basic auth: base64(apiKey + ":")
-  const basicToken = Buffer.from(`${apiKey}:`).toString('base64');
+  // Interakt uses HTTP Basic auth: base64(apiKey) — no username:password colon
+  const basicToken = Buffer.from(apiKey).toString('base64');
 
   try {
     const res = await fetch('https://api.interakt.ai/v1/public/track/users/', {
