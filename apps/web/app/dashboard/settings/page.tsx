@@ -1057,6 +1057,7 @@ function WhatsAppApiKeyEditor({ setHasChanges }: { setHasChanges: (v: boolean) =
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
 
   const [validating, setValidating] = useState(false);
   const [validStatus, setValidStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
@@ -1201,7 +1202,7 @@ function WhatsAppApiKeyEditor({ setHasChanges }: { setHasChanges: (v: boolean) =
               <Input
                 type={showKey ? 'text' : 'password'}
                 value={newKey}
-                onChange={e => { setNewKey(e.target.value); setError(''); }}
+                onChange={e => { setNewKey(e.target.value); setError(''); setWarning(''); }}
                 placeholder="ik_live_••••••••••••••••••••••••"
                 className="font-mono pr-10"
                 autoFocus
@@ -1229,7 +1230,7 @@ function WhatsAppApiKeyEditor({ setHasChanges }: { setHasChanges: (v: boolean) =
             </button>
             {hasExisting && (
               <button
-                onClick={() => { setMode('view'); setNewKey(''); setError(''); }}
+                onClick={() => { setMode('view'); setNewKey(''); setError(''); setWarning(''); }}
                 className="shrink-0 px-3 py-2.5 rounded-lg border border-border text-[13px] font-body text-rx-text-muted hover:text-rx-text-primary transition-colors"
               >
                 Cancel
@@ -1242,12 +1243,18 @@ function WhatsAppApiKeyEditor({ setHasChanges }: { setHasChanges: (v: boolean) =
               <p className="text-[12px] font-body text-rx-red flex-1">{error}</p>
             </div>
           )}
-          {validStatus === 'valid' && !saved && (
+          {warning && !error && (
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/25">
+              <span className="text-amber-400 text-[13px] shrink-0">⚠️</span>
+              <p className="text-[12px] font-body text-amber-300 flex-1">{warning}</p>
+            </div>
+          )}
+          {validStatus === 'valid' && !saved && !warning && (
             <p className="text-[12px] font-body text-rx-green-text flex items-center gap-1">
               <span>✓</span> Key verified with Interakt — saving…
             </p>
           )}
-          {saved && <p className="text-[12px] font-body text-rx-green-text font-medium">✓ Interakt API key verified and saved successfully.</p>}
+          {saved && <p className="text-[12px] font-body text-rx-green-text font-medium">✓ Interakt API key saved successfully.</p>}
         </div>
       )}
     </div>
