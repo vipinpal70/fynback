@@ -39,3 +39,14 @@ apps/web/out/
 # Debug output
 apps/web/build_log.txt
 apps/web/tsc_output*.txt
+
+# GSD / Antigravity agent template files — local tooling only, not for version control
+.agent/
+.gemini/
+.gsd/
+adapters/
+docs/
+scripts/
+PROJECT_RULES.md
+GSD-STYLE.md
+model_capabilities.yaml

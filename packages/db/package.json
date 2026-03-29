@@ -8,7 +8,8 @@
   "scripts": {
     "seed": "tsx src/seed/campaigns.seed.ts",
     "generate": "drizzle-kit generate",
-    "push": "drizzle-kit push"
+    "push": "drizzle-kit push",
+    "postpush": "tsx src/seed/campaigns.seed.ts"
   },
   "dependencies": {
     "@fynback/shared": "workspace:*",

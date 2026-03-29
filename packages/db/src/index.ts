@@ -41,6 +41,11 @@ export * from './queries/onboarding';
 export * from './queries/payments';
 export * from './queries/campaigns';
 
+// ── Seed utilities ────────────────────────────────────────────────────────────
+// Exported so the web app can call seedCampaignDefaults() during onboarding
+// to guarantee system default templates exist on a fresh database.
+export { seedCampaignDefaults } from './seed/campaigns.seed';
+
 // ── Drizzle ORM operators ─────────────────────────────────────────────────────
 // Re-exported so consumers don't need 'drizzle-orm' as a direct dependency
 export * from 'drizzle-orm';

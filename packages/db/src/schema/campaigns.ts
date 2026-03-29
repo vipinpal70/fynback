@@ -51,9 +51,13 @@ import { failedPayments, outreachEvents } from './payments';
 const textArray = customType<{ data: string[]; driverData: string }>({
   dataType() { return 'text[]'; },
   toDriver(val) { return `{${val.map((v) => `"${v.replace(/"/g, '\\"')}"`).join(',')}}`; },
-  fromDriver(val) {
-    if (!val || val === '{}') return [];
-    return val.replace(/^\{|\}$/g, '').split(',').map((s) => s.replace(/^"|"$/g, '').replace(/\\"/g, '"'));
+  fromDriver(val: unknown) {
+    // The postgres-js driver (used via Drizzle) may already parse text[] into
+    // a JS string[] before calling fromDriver — handle both cases gracefully.
+    if (Array.isArray(val)) return val as string[];
+    const s = val as string;
+    if (!s || s === '{}') return [];
+    return s.replace(/^\{|\}$/g, '').split(',').map((e) => e.replace(/^"|"$/g, '').replace(/\\"/g, '"'));
   },
 });
 
