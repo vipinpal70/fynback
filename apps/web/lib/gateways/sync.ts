@@ -2,20 +2,23 @@
  * lib/gateways/sync.ts
  *
  * Historical sync: fetch current-month failed payments from a gateway,
- * insert into failed_payments, recompute merchant KPI stats, bust Redis cache.
+ * insert into failed_payments, enqueue campaign jobs for each new failure,
+ * recompute merchant KPI stats, bust Redis cache.
  *
  * WHY CURRENT MONTH ONLY:
  * On first connect we want data fast. Fetching all-time history could mean
  * thousands of payments and many API calls. Current month gives the merchant
- * instant value without long waits. They can request full history separately.
+ * instant value without long waits.
  *
  * IDEMPOTENT: uses onConflictDoNothing on gateway_event_id unique constraint.
- * Safe to re-run at any time — won't double-count payments.
+ * Safe to re-run at any time — won't double-count payments or double-send campaigns.
  */
 
 import { createDb, failedPayments, merchants, eq, sql as drizzleSql } from '@fynback/db';
 import { fetchFailedPayments, categorizeDecline, mapPaymentMethod } from './razorpay';
 import { cacheDelete } from '@/lib/cache/redis';
+import { campaignQueue } from '@fynback/queue';
+import type { ValidateCustomerChannelsJobData } from '@fynback/queue';
 
 export interface SyncResult {
   fetched: number;
@@ -28,7 +31,8 @@ export async function syncGatewayHistory(
   connectionId: string,
   gatewayName: 'razorpay',
   apiKey: string,
-  apiSecret: string
+  apiSecret: string,
+  merchantPlan: string = 'trial'  // used to pick the right system default campaign
 ): Promise<SyncResult> {
   const db = createDb(process.env.DATABASE_URL!);
 
@@ -72,8 +76,43 @@ export async function syncGatewayHistory(
         .onConflictDoNothing()
         .returning({ id: failedPayments.id });
 
-      if (rows.length > 0) inserted++;
-      else skipped++;
+      if (rows.length > 0) {
+        inserted++;
+
+        // ── Trigger campaign for this historical failure ──────────────────
+        // Only enqueue if we have a way to contact the customer.
+        // Priority 2 (lower than live webhooks at priority 1) so real-time
+        // failures are always processed first.
+        const hasContact = !!(p.email || p.contact);
+        if (hasContact) {
+          campaignQueue
+            .add(
+              'validate_customer_channels',
+              {
+                type: 'validate_customer_channels',
+                failedPaymentId: rows[0].id,
+                merchantId,
+                customerEmail: p.email ?? undefined,
+                customerPhone: p.contact ?? undefined,
+                customerName: undefined,
+                gatewayCustomerId: p.customer_id ?? undefined,
+                amountPaise: p.amount,
+                currency: p.currency,
+                declineCategory: categorizeDecline(p),
+                planRequired: merchantPlan,
+              } satisfies ValidateCustomerChannelsJobData,
+              { priority: 2 }
+            )
+            .catch((err) =>
+              console.error(
+                `[SyncGateway] Failed to enqueue campaign for payment ${rows[0].id}:`,
+                err
+              )
+            );
+        }
+      } else {
+        skipped++;
+      }
     } catch {
       skipped++;
     }

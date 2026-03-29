@@ -47,6 +47,12 @@ module.exports = {
       max_memory_restart: '256M',
       env: {
         NODE_ENV: 'production',
+        // Redis — local instance on the same Ubuntu server
+        REDIS_HOST: '127.0.0.1',
+        REDIS_PORT: '6379',
+        // These are loaded from apps/worker/.env by dotenv at startup.
+        // Listed here too so PM2 restart/reload always picks them up.
+        // DATABASE_URL, RESEND_API_KEY, ENCRYPTION_SECRET, etc. come from .env
       },
       error_file: `${APP_ROOT}/logs/worker-error.log`,
       out_file: `${APP_ROOT}/logs/worker-out.log`,

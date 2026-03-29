@@ -7,7 +7,7 @@ import { welcomeQueue } from '@fynback/queue'
 import Razorpay from 'razorpay'
 import crypto from 'crypto'
 import { encrypt } from '@/lib/crypto'
-import { isTestKey as isRazorpayTestKey } from '@/lib/gateways/razorpay'
+import { isTestKey as isRazorpayTestKey, registerWebhook as registerRazorpayWebhook } from '@/lib/gateways/razorpay'
 import { isTestKey as isCashfreeTestKey } from '@/lib/gateways/cashfree'
 import { syncGatewayHistory } from '@/lib/gateways/sync'
 
@@ -258,12 +258,22 @@ export const completeOnboarding = async (formData: FormData) => {
 
         // Sync in background — don't block onboarding completion
         if (conn?.id) {
+          if (gatewayConnected === 'razorpay') {
+            registerRazorpayWebhook(
+              gatewayApiKey,
+              gatewayApiSecret,
+              `${appUrl}/api/webhooks/razorpay`,
+              webhookSecret
+            ).catch((err) => console.error('[completeOnboarding] Razorpay webhook registration error:', err))
+          }
+
           syncGatewayHistory(
             result.merchantId,
             conn.id,
             gatewayConnected as 'razorpay',
             gatewayApiKey,
-            gatewayApiSecret
+            gatewayApiSecret,
+            plan  // used to pick the right system default campaign template
           ).catch((err) => console.error('[completeOnboarding] gateway sync error:', err))
         }
       } catch (err) {

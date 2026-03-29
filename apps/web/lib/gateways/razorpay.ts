@@ -31,6 +31,44 @@ export async function validateCredentials(key: string, secret: string): Promise<
   }
 }
 
+/** Auto-registers the FynBack webhook with the merchant's Razorpay account. */
+export async function registerWebhook(
+  key: string,
+  secret: string,
+  webhookUrl: string,
+  webhookSecret: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const r = await fetch(`${BASE}/webhooks`, {
+      method: 'POST',
+      headers: {
+        Authorization: authHeader(key, secret),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        url: webhookUrl,
+        alert_email: '',
+        secret: webhookSecret,
+        active: true,
+        events: {
+          'payment.failed': true,
+          'subscription.paused': true,
+          'subscription.halted': true,
+          'subscription.cancelled': true,
+          'payment_link.partially_paid': true,
+          'payment_link.expired': true,
+          'payment_link.cancelled': true,
+        },
+      }),
+    });
+    if (r.ok) return { success: true };
+    const errBody = await r.json().catch(() => ({}));
+    return { success: false, error: errBody.error?.description || `Gateway returned ${r.status}` };
+  } catch (err) {
+    return { success: false, error: 'Could not reach Razorpay API' };
+  }
+}
+
 export interface RazorpayPayment {
   id: string;
   order_id: string | null;
