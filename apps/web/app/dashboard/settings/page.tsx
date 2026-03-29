@@ -81,7 +81,8 @@ const DEFAULT_MERCHANT_DATA = {
     brandColorHex: '#3b82f6',
     companyTagline: 'The subscription SaaS for modern teams',
     whatsappEnabled: true,
-    interaktApiKey: 'ik_live_*********************xyz',
+    interaktApiKey: '',
+    interaktApiKey_new: '',
     whatsappSenderName: 'AcmeSaaS',
     whatsappTemplatesApproved: true,
     smsEnabled: false,
@@ -1046,12 +1047,218 @@ function GatewaysSection() {
   );
 }
 
+// ─── WhatsApp API Key Editor ──────────────────────────────────────────────────
+
+function WhatsAppApiKeyEditor({ setHasChanges }: { setHasChanges: (v: boolean) => void }) {
+  const hasExisting = !!merchantData.brand.interaktApiKey;
+  const [mode, setMode] = useState<'view' | 'edit'>(hasExisting ? 'view' : 'edit');
+  const [showKey, setShowKey] = useState(false);
+  const [newKey, setNewKey] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+
+  const [validating, setValidating] = useState(false);
+  const [validStatus, setValidStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
+
+  const handleSaveKey = async () => {
+    if (!newKey.trim()) { setError('Please enter a valid API key.'); return; }
+    setError('');
+
+    // ── Step 1: Validate ─────────────────────────────────────────────────────
+    setValidating(true);
+    setValidStatus('idle');
+    let keyIsValid = false;
+    try {
+      const validateRes = await fetch('/api/settings/validate-interakt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: newKey.trim() }),
+      });
+      const vData = await validateRes.json();
+      if (!vData.valid) {
+        setValidStatus('invalid');
+        setError(vData.message || 'Invalid API key. Please check your Interakt account.');
+        setValidating(false);
+        return;
+      }
+      keyIsValid = true;
+      setValidStatus('valid');
+    } catch {
+      // Network error during validation — allow save with warning
+      keyIsValid = true;
+      setValidStatus('idle');
+    } finally {
+      setValidating(false);
+    }
+
+    if (!keyIsValid) return;
+
+    // ── Step 2: Save ─────────────────────────────────────────────────────────
+    setSaving(true);
+    try {
+      const res = await fetch('/api/settings/merchant', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interaktApiKey: newKey.trim() }),
+      });
+      if (res.ok) {
+        merchantData.brand.interaktApiKey = newKey.trim();
+        merchantData.brand.interaktApiKey_new = newKey.trim();
+        setNewKey('');
+        setMode('view');
+        setSaved(true);
+        setTimeout(() => { setSaved(false); setValidStatus('idle'); }, 3000);
+      } else {
+        setError('Failed to save. Please try again.');
+      }
+    } catch {
+      setError('Network error. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClear = async () => {
+    if (!confirm('Remove the saved Interakt API key?')) return;
+    setSaving(true);
+    try {
+      const res = await fetch('/api/settings/merchant', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interaktApiKey: '' }),
+      });
+      if (res.ok) {
+        merchantData.brand.interaktApiKey = '';
+        merchantData.brand.interaktApiKey_new = '';
+        setMode('edit');
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <label className="block text-[13px] font-body font-medium text-rx-text-secondary">
+          Interakt API key
+        </label>
+        <a
+          href="https://app.interakt.ai/settings/developer-setting"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1 text-[12px] font-body text-rx-blue hover:underline"
+        >
+          <ExternalLink size={11} />
+          Interakt Developer Settings
+        </a>
+      </div>
+
+      {mode === 'view' && hasExisting ? (
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Input
+              value={showKey ? merchantData.brand.interaktApiKey : maskApiKey('ik_live_')}
+              readOnly
+              className="font-mono pr-20 cursor-default"
+            />
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
+              <button
+                onClick={() => setShowKey(v => !v)}
+                className="p-1.5 rounded hover:bg-rx-overlay text-rx-text-muted transition-colors"
+                title={showKey ? 'Hide key' : 'Show key'}
+              >
+                {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+              {showKey && <CopyButton value={merchantData.brand.interaktApiKey} />}
+            </div>
+          </div>
+          <button
+            onClick={() => setMode('edit')}
+            className="shrink-0 px-3 py-2 rounded-lg border border-border text-[13px] font-body text-rx-text-muted hover:text-rx-text-primary hover:border-rx-blue transition-colors"
+          >
+            Update key
+          </button>
+          <button
+            onClick={handleClear}
+            disabled={saving}
+            className="shrink-0 p-2 rounded-lg border border-border text-rx-text-muted hover:text-rx-red hover:border-rx-red transition-colors"
+            title="Remove key"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <p className="text-[12px] font-body text-rx-text-muted">
+            {hasExisting
+              ? 'Enter a new key to replace the existing one.'
+              : 'Paste your Interakt secret API key. Find it at Settings → Developer Setting inside your Interakt account.'}
+          </p>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Input
+                type={showKey ? 'text' : 'password'}
+                value={newKey}
+                onChange={e => { setNewKey(e.target.value); setError(''); }}
+                placeholder="ik_live_••••••••••••••••••••••••"
+                className="font-mono pr-10"
+                autoFocus
+              />
+              <button
+                onClick={() => setShowKey(v => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-rx-text-muted hover:text-rx-text-primary transition-colors"
+              >
+                {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+            <button
+              onClick={handleSaveKey}
+              disabled={validating || saving || !newKey.trim()}
+              className={cn(
+                'shrink-0 px-4 py-2.5 rounded-lg text-[13px] font-body font-medium transition-all disabled:opacity-40',
+                validStatus === 'valid'
+                  ? 'bg-rx-green text-white hover:opacity-90'
+                  : validStatus === 'invalid'
+                  ? 'bg-rx-red text-white cursor-not-allowed'
+                  : 'bg-rx-blue text-white hover:opacity-90',
+              )}
+            >
+              {validating ? 'Verifying…' : saving ? 'Saving…' : saved ? '✓ Verified & saved!' : 'Save key'}
+            </button>
+            {hasExisting && (
+              <button
+                onClick={() => { setMode('view'); setNewKey(''); setError(''); }}
+                className="shrink-0 px-3 py-2.5 rounded-lg border border-border text-[13px] font-body text-rx-text-muted hover:text-rx-text-primary transition-colors"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+          {error && (
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-rx-red-dim border border-rx-red/20">
+              <span className="text-rx-red text-[13px] shrink-0">✗</span>
+              <p className="text-[12px] font-body text-rx-red flex-1">{error}</p>
+            </div>
+          )}
+          {validStatus === 'valid' && !saved && (
+            <p className="text-[12px] font-body text-rx-green-text flex items-center gap-1">
+              <span>✓</span> Key verified with Interakt — saving…
+            </p>
+          )}
+          {saved && <p className="text-[12px] font-body text-rx-green-text font-medium">✓ Interakt API key verified and saved successfully.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function WhatsAppSection({ setHasChanges }: { setHasChanges: (v: boolean) => void }) {
   const [waEnabled, setWaEnabled] = useState(merchantData.brand.whatsappEnabled);
   const [waDay0, setWaDay0] = useState(true);
   const [waDay5, setWaDay5] = useState(true);
   const [waPortal, setWaPortal] = useState(true);
-  const [showApiKey, setShowApiKey] = useState(false);
 
   const templates = [
     { name: 'payment_initial_reminder', category: 'UTILITY', used: 143, preview: 'Hi {{1}}, there was an issue processing ₹{{2}} for {{3}}…' },
@@ -1082,17 +1289,7 @@ function WhatsAppSection({ setHasChanges }: { setHasChanges: (v: boolean) => voi
           ))}
         </div>
 
-        <FormField label="Interakt API key">
-          <div className="relative">
-            <Input value={showApiKey ? merchantData.brand.interaktApiKey : maskApiKey('ik_live_')} readOnly className="font-mono pr-20" />
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
-              <button onClick={() => setShowApiKey(v => !v)} className="p-1.5 rounded hover:bg-rx-overlay text-rx-text-muted transition-colors">
-                {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-              <button className="p-1.5 rounded hover:bg-rx-overlay text-rx-text-muted transition-colors" title="Rotate key"><RefreshCw size={14} /></button>
-            </div>
-          </div>
-        </FormField>
+        <WhatsAppApiKeyEditor setHasChanges={setHasChanges} />
 
         <div className="mt-5">
           <p className="text-[13px] font-body font-medium text-rx-text-primary mb-3">Meta-approved message templates</p>
@@ -1765,6 +1962,8 @@ export default function SettingsPage() {
             brandColorHex: brand.brandColorHex || DEFAULT_MERCHANT_DATA.brand.brandColorHex,
             companyTagline: brand.companyTagline || DEFAULT_MERCHANT_DATA.brand.companyTagline,
             whatsappEnabled: brand.whatsappEnabled ?? false,
+            interaktApiKey: brand.interaktApiKey || '',
+            interaktApiKey_new: '',
             whatsappSenderName: brand.whatsappSenderName || DEFAULT_MERCHANT_DATA.brand.whatsappSenderName,
             // slackWebhookUrl is already decrypted by the API
             slackWebhookUrl: brand.slackWebhookUrl || '',
@@ -1821,6 +2020,7 @@ export default function SettingsPage() {
           defaultCampaignPreference: merchantData.brand.defaultCampaignPreference,
           slackWebhookUrl: merchantData.brand.slackWebhookUrl,
           whatsappEnabled: merchantData.brand.whatsappEnabled,
+          interaktApiKey: merchantData.brand.interaktApiKey_new || undefined,
           digestFrequency: merchantData.brand.digestFrequency,
           companyName: merchantData.companyName,
           websiteUrl: merchantData.websiteUrl,

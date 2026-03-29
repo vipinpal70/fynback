@@ -101,6 +101,7 @@ export async function GET() {
                 ...brand,
                 // Decrypt at the API layer — never send ciphertext to the client
                 slackWebhookUrl: tryDecrypt(brand.slackWebhookUrl),
+                interaktApiKey: tryDecrypt(brand.interaktApiKeyEncrypted),
               }
             : null,
           team,
@@ -146,6 +147,7 @@ export async function PATCH(req: NextRequest) {
       websiteUrl,
       logoUrl,
       companyTagline,
+      interaktApiKey,
     } = body;
 
     const db = createDb(process.env.DATABASE_URL!);
@@ -172,6 +174,10 @@ export async function PATCH(req: NextRequest) {
     // Encrypt slack URL only if a new non-empty value was provided
     if (slackWebhookUrl !== undefined) {
       brandUpdate.slackWebhookUrl = slackWebhookUrl ? encrypt(slackWebhookUrl) : '';
+    }
+    // Encrypt Interakt key — empty string clears it
+    if (interaktApiKey !== undefined) {
+      brandUpdate.interaktApiKeyEncrypted = interaktApiKey ? encrypt(interaktApiKey) : null;
     }
 
     await db

@@ -28,6 +28,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar,
 } from "recharts";
 import type { DashboardKpis, RecentPayment, GatewayStatus, AnalyticsPoint } from "@/lib/cache/dashboard";
+import { InteraktWarningModal } from "@/components/dashboard/InteraktWarningModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -182,6 +183,9 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasGateway, setHasGateway] = useState(false);
 
+  // Interakt warning modal state
+  const [interaktWarning, setInteraktWarning] = useState<{ merchantId: string; email: string } | null>(null);
+
   // ─── Live Activity Feed ───────────────────────────────────────────────────
   const now = useRef(Date.now());
   const nextId = useRef(9);
@@ -200,11 +204,12 @@ export default function DashboardPage() {
   useEffect(() => {
     async function loadDashboard() {
       try {
-        const [kpisRes, paymentsRes, gatewaysRes, analyticsRes] = await Promise.all([
+        const [kpisRes, paymentsRes, gatewaysRes, analyticsRes, settingsRes] = await Promise.all([
           fetch("/api/dashboard/kpis"),
           fetch("/api/dashboard/payments?limit=6"),
           fetch("/api/dashboard/gateways"),
           fetch("/api/dashboard/analytics"),
+          fetch("/api/settings/merchant"),
         ]);
 
         if (kpisRes.ok) {
@@ -223,6 +228,20 @@ export default function DashboardPage() {
         if (analyticsRes.ok) {
           const data = await analyticsRes.json();
           setAnalyticsHistory(data);
+        }
+        // Check if merchant has WhatsApp enabled but no Interakt key
+        if (settingsRes.ok) {
+          const settingsData = await settingsRes.json();
+          if (
+            settingsData.brand?.whatsappEnabled === true &&
+            !settingsData.brand?.interaktApiKey &&
+            settingsData.merchant?.id
+          ) {
+            setInteraktWarning({
+              merchantId: settingsData.merchant.id,
+              email: settingsData.currentUserEmail || '',
+            });
+          }
         }
       } catch (err) {
         console.error("Dashboard load error:", err);
@@ -277,7 +296,14 @@ export default function DashboardPage() {
   // ─── Empty state — no gateway connected ──────────────────────────────────
   if (!isLoading && !hasGateway) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 px-4 text-center bg-rx-surface border border-border rounded-xl mt-6">
+      <>
+        {interaktWarning && (
+          <InteraktWarningModal
+            merchantId={interaktWarning.merchantId}
+            merchantEmail={interaktWarning.email}
+          />
+        )}
+        <div className="flex flex-col items-center justify-center py-20 px-4 text-center bg-rx-surface border border-border rounded-xl mt-6">
         <div className="w-16 h-16 rounded-2xl bg-rx-overlay flex items-center justify-center mb-6">
           <Unplug size={32} className="text-rx-text-muted" strokeWidth={1.5} />
         </div>
@@ -296,11 +322,19 @@ export default function DashboardPage() {
         </a>
         <p className="text-xs font-body text-rx-text-muted">Also supports: Stripe · Cashfree · PayU</p>
       </div>
+    </>
     );
   }
 
   return (
-    <div className="space-y-6 max-w-[1400px]">
+    <>
+      {interaktWarning && (
+        <InteraktWarningModal
+          merchantId={interaktWarning.merchantId}
+          merchantEmail={interaktWarning.email}
+        />
+      )}
+      <div className="space-y-6 max-w-[1400px]">
       {/* Mobile pull-to-refresh hint */}
       <div className="md:hidden flex items-center justify-center -mt-2 pb-2 text-[10px] text-rx-text-muted font-body animate-pulse">
         <RefreshCw size={12} className="mr-1.5" /> Pull down to refresh
@@ -813,5 +847,6 @@ export default function DashboardPage() {
         )}
       </section>
     </div>
+    </>
   );
 }

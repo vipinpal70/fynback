@@ -55,6 +55,7 @@ export default function OnboardingPage() {
 		brandColorHex: "#3b82f6",
 		defaultRecoveryCampaign: "standard_10d",
 		whatsappOptIn: false,
+		interaktApiKey: '',
 		// Step 6 — Team & notifications
 		teamEmails: "",
 		slackWebhookUrl: "",

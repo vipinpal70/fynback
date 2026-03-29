@@ -15,7 +15,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { id } = await params;
   if (!id) {
-      return NextResponse.json({ error: 'ID is required' }, { status: 400 });
+    return NextResponse.json({ error: 'ID is required' }, { status: 400 });
   }
 
   try {
@@ -42,34 +42,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-  
-    const { id } = await params;
-    if (!id) {
-        return NextResponse.json({ error: 'ID is required' }, { status: 400 });
-    }
-  
-    try {
-      const merchantId = await getMerchantIdFromClerkUserId(userId);
-      if (!merchantId) {
-        return NextResponse.json({ error: 'Merchant not found' }, { status: 404 });
-      }
-  
-      await db
-        .delete(notifications)
-        .where(
-          and(
-            eq(notifications.id, id),
-            eq(notifications.merchantId, merchantId)
-          )
-        );
-  
-      return NextResponse.json({ success: true });
-    } catch (err) {
-      console.error(`[API] /api/notifications/${id} DELETE error:`, err);
-      return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-    }
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const { id } = await params;
+  if (!id) {
+    return NextResponse.json({ error: 'ID is required' }, { status: 400 });
+  }
+
+  try {
+    const merchantId = await getMerchantIdFromClerkUserId(userId);
+    if (!merchantId) {
+      return NextResponse.json({ error: 'Merchant not found' }, { status: 404 });
+    }
+
+    await db
+      .delete(notifications)
+      .where(
+        and(
+          eq(notifications.id, id),
+          eq(notifications.merchantId, merchantId)
+        )
+      );
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error(`[API] /api/notifications/${id} DELETE error:`, err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}

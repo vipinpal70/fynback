@@ -581,6 +581,35 @@ export function Step4({
                 </div>
             </Card>
 
+            {values.whatsappOptIn && (
+                <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                    <Field
+                        id="interaktApiKey"
+                        label="Interakt API Key"
+                        hint="Your secret API key from Interakt's developer settings. This is used to send WhatsApp recovery messages to your customers."
+                    >
+                        <Input
+                            id="interaktApiKey"
+                            name="interaktApiKey"
+                            type="password"
+                            value={values.interaktApiKey}
+                            onChange={onChange}
+                            placeholder="ik_live_••••••••••••••••••••••••"
+                            className="bg-zinc-950 border-zinc-800 font-mono text-white"
+                        />
+                    </Field>
+                    <a
+                        href="https://app.interakt.ai/settings/developer-setting"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        Find your API key → Interakt Developer Settings
+                    </a>
+                </div>
+            )}
+
 			<NavButtons
 				showBack
 				onBack={onBack}
