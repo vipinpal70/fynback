@@ -146,13 +146,21 @@ async function handleValidateChannels(
     throw new Error(`Failed to upsert customer for payment ${data.failedPaymentId}`);
   }
 
-  // ── 2. Validate email (MX check) ────────────────────────────────────────
+  // ── 2. Validate email (MX check & Placeholder block) ────────────────────
   let emailValid = true;
   if (data.customerEmail) {
-    emailValid = await checkEmailMx(data.customerEmail);
+    if (data.customerEmail === 'void@razorpay.com') {
+      emailValid = false;
+      console.log(`[CampaignWorker] Email is Razorpay placeholder — marked invalid`);
+    } else {
+      emailValid = await checkEmailMx(data.customerEmail);
+      if (!emailValid) {
+        console.log(`[CampaignWorker] Email ${data.customerEmail} failed MX check — marked invalid`);
+      }
+    }
+
     if (!emailValid) {
       await campaignQueries.markEmailInvalid(db, customer.id);
-      console.log(`[CampaignWorker] Email ${data.customerEmail} failed MX check — marked invalid`);
     }
   }
 
@@ -351,8 +359,10 @@ async function handleScheduleCampaign(
       (step.channels as string[] | null)?.length ? (step.channels as string[]) : [step.preferredChannel]
     ).filter((ch) => channelsActive.includes(ch as 'email' | 'whatsapp' | 'sms')) as ('email' | 'whatsapp' | 'sms')[];
 
-    // If no channels survived the intersection, fall back to email (best-effort)
-    const activeStepChannels = stepChannels.length > 0 ? stepChannels : (['email'] as const);
+    // If no channels survived the intersection, fall back to the active channel for this user (best-effort)
+    const activeStepChannels = stepChannels.length > 0
+      ? stepChannels
+      : (channelsActive.length > 0 ? [channelsActive[0]] : ['email'] as ('email' | 'whatsapp' | 'sms')[]);
 
     // Pre-load all message templates for this step (one DB call, reuse for each channel)
     const messages = await campaignQueries.getMessageTemplatesForStep(db, step.id);
@@ -420,7 +430,7 @@ async function handleScheduleCampaign(
       await bullJob.updateData({
         ...bullJob.data,
         campaignRunStepId: step.id,
-      });
+      } as any);
     }
   }
 
@@ -706,7 +716,9 @@ function resolveChannels(opts: {
 }): ('email' | 'whatsapp' | 'sms')[] {
   const channels: ('email' | 'whatsapp' | 'sms')[] = [];
 
-  if (opts.hasEmail) channels.push('email');
+  if (opts.hasEmail) {
+    channels.push('email');
+  }
 
   if (opts.hasPhone) {
     channels.push(opts.hasWhatsapp ? 'whatsapp' : 'sms');
@@ -1000,11 +1012,11 @@ function buildMerchantDunningEmail(params: {
   const bodyContent = params.bodyHtmlContent
     ? params.bodyHtmlContent
     : params.bodyText
-        .split('\n\n')
-        .map(p =>
-          `<p style="margin:0 0 16px 0;font-size:15px;color:#444444;line-height:1.7;">${p.replace(/\n/g, '<br>')}</p>`
-        )
-        .join('');
+      .split('\n\n')
+      .map(p =>
+        `<p style="margin:0 0 16px 0;font-size:15px;color:#444444;line-height:1.7;">${p.replace(/\n/g, '<br>')}</p>`
+      )
+      .join('');
 
   return `<!DOCTYPE html>
 <html lang="en">
