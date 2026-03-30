@@ -6,10 +6,10 @@
     "access": "public"
   },
   "scripts": {
-    "seed": "tsx src/seed/campaigns.seed.ts",
+    "seed": "tsx src/seed/run.ts",
     "generate": "drizzle-kit generate",
     "push": "drizzle-kit push",
-    "postpush": "tsx src/seed/campaigns.seed.ts"
+    "postpush": "tsx src/seed/run.ts"
   },
   "dependencies": {
     "@fynback/shared": "workspace:*",

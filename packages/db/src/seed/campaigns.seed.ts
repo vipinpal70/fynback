@@ -602,24 +602,3 @@ export async function seedCampaignDefaults(db: ReturnType<typeof createDb>) {
   console.log('[Seed] Campaign defaults seed complete ✓');
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CLI runner (pnpm --filter @fynback/db seed)
-// ─────────────────────────────────────────────────────────────────────────────
-
-if (require.main === module) {
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    console.error('[Seed] DATABASE_URL environment variable is required');
-    process.exit(1);
-  }
-
-  const { createDb: makeDb } = require('../index');
-  const db = makeDb(url);
-
-  seedCampaignDefaults(db)
-    .then(() => process.exit(0))
-    .catch((err: Error) => {
-      console.error('[Seed] Error:', err);
-      process.exit(1);
-    });
-}
