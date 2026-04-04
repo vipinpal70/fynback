@@ -3,7 +3,7 @@
 import { auth, clerkClient } from '@clerk/nextjs/server'
 import { cookies } from 'next/headers'
 import { createDb, users, merchants, memberships, merchantBrandSettings, gatewayConnections, invites, eq, and, seedCampaignDefaults } from '@fynback/db'
-import { welcomeQueue } from '@fynback/queue'
+import { welcomeQueue, gatewayQueue } from '@fynback/queue'
 import Razorpay from 'razorpay'
 import crypto from 'crypto'
 import { encrypt } from '@/lib/crypto'
@@ -235,7 +235,15 @@ export const completeOnboarding = async (formData: FormData) => {
     // ── 6. Gateway connection + historical sync ──────────────────────────
     if (gatewayConnected && gatewayApiKey && gatewayApiSecret) {
       const webhookSecret = crypto.randomBytes(24).toString('hex')
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+      // Match the fallback logic in /api/gateways/connect — never use localhost in production
+      const appUrl =
+        process.env.NEXT_PUBLIC_APP_URL ||
+        (process.env.NODE_ENV === 'production' ? 'https://app.fynback.com' : 'http://localhost:3000')
+      const webhookUrl = `${appUrl}/api/webhooks/${gatewayConnected}`
+      const testMode =
+        gatewayConnected === 'cashfree' ? isCashfreeTestKey(gatewayApiKey, gatewayApiSecret) :
+          gatewayConnected === 'razorpay' ? isRazorpayTestKey(gatewayApiKey) :
+            false
       try {
         const [conn] = await db
           .insert(gatewayConnections)
@@ -245,24 +253,21 @@ export const completeOnboarding = async (formData: FormData) => {
             apiKeyEncrypted: encrypt(gatewayApiKey),
             apiSecretEncrypted: encrypt(gatewayApiSecret),
             webhookSecretEncrypted: encrypt(webhookSecret),
-            webhookUrl: `${appUrl}/api/webhooks/${gatewayConnected}`,
+            webhookUrl,
             isActive: true,
-            testMode:
-              gatewayConnected === 'cashfree' ? isCashfreeTestKey(gatewayApiKey, gatewayApiSecret) :
-                gatewayConnected === 'razorpay' ? isRazorpayTestKey(gatewayApiKey) :
-                  false,
+            testMode,
             connectedAt: new Date(),
           })
           .onConflictDoNothing()
           .returning({ id: gatewayConnections.id })
 
-        // Sync in background — don't block onboarding completion
+        // Background jobs — don't block onboarding completion
         if (conn?.id) {
           if (gatewayConnected === 'razorpay') {
             registerRazorpayWebhook(
               gatewayApiKey,
               gatewayApiSecret,
-              `${appUrl}/api/webhooks/razorpay`,
+              webhookUrl,
               webhookSecret
             ).catch((err) => console.error('[completeOnboarding] Razorpay webhook registration error:', err))
           }
@@ -275,6 +280,17 @@ export const completeOnboarding = async (formData: FormData) => {
             gatewayApiSecret,
             plan  // used to pick the right system default campaign template
           ).catch((err) => console.error('[completeOnboarding] gateway sync error:', err))
+
+          // Send the gateway-connected email with webhook URL + secret so the merchant
+          // can manually configure it in their Razorpay dashboard if auto-registration failed.
+          gatewayQueue.add('gateway-connected', {
+            email,
+            fullName,
+            gatewayName: gatewayConnected,
+            webhookUrl,
+            webhookSecret,
+            testMode,
+          }).catch((err) => console.error('[completeOnboarding] gateway-connected email enqueue error:', err))
         }
       } catch (err) {
         console.error('[completeOnboarding] gateway connect error:', err)
