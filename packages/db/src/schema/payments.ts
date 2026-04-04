@@ -390,6 +390,17 @@ export const failedPayments = pgTable(
      */
     activeCampaignRunId: uuid('active_campaign_run_id'),
 
+    /**
+     * Why recovery was cancelled without completion.
+     * Set when status transitions to 'cancelled' so the dashboard can explain
+     * why no further outreach was attempted.
+     * Known values:
+     *   'email_not_found_whatsapp_disabled'        — contact has no email and merchant has WhatsApp off
+     *   'email_sequence_exhausted_whatsapp_disabled' — 3 emails sent, WhatsApp off, no more channels
+     *   'email_sequence_exhausted_no_phone'         — 3 emails sent, no phone to escalate to WhatsApp
+     */
+    cancellationReason: text('cancellation_reason'),
+
     // Soft delete (deletedAt not used for failed_payments — we keep all for compliance)
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

@@ -514,7 +514,30 @@ async function handleSendEmail(job: Job<SendEmailJobData>): Promise<void> {
   const data = job.data;
 
   if (!data.customerEmail) {
-    console.warn(`[RecoveryWorker] No customer email for payment ${data.failedPaymentId} — skipping email step ${data.stepNumber}`);
+    // No email — check if WhatsApp is a fallback option before giving up
+    const brandRows = await db
+      .select({ whatsappEnabled: merchantBrandSettings.whatsappEnabled })
+      .from(merchantBrandSettings)
+      .where(eq(merchantBrandSettings.merchantId, data.merchantId))
+      .limit(1);
+
+    const whatsappEnabled = brandRows[0]?.whatsappEnabled ?? false;
+
+    if (!whatsappEnabled) {
+      // No email AND WhatsApp is disabled — nothing left to try; discard recovery
+      await paymentQueries.updateFailedPaymentStatus(db, data.failedPaymentId, {
+        status: 'cancelled',
+        cancellationReason: 'email_not_found_whatsapp_disabled',
+      });
+      console.warn(
+        `[RecoveryWorker] Payment ${data.failedPaymentId} — no customer email and WhatsApp is disabled for merchant ${data.merchantId}. Recovery discarded.`
+      );
+    } else {
+      // WhatsApp is on but we're in an email job — just skip this step; WhatsApp job handles it
+      console.warn(
+        `[RecoveryWorker] No customer email for payment ${data.failedPaymentId} — skipping email step ${data.stepNumber}`
+      );
+    }
     return;
   }
 
@@ -604,16 +627,31 @@ async function handleSendEmail(job: Job<SendEmailJobData>): Promise<void> {
 
     console.log(`[RecoveryWorker] Scheduled email step ${nextStepNumber} for payment ${data.failedPaymentId} in 3 days`);
   } else {
-    // All 3 email steps exhausted — try WhatsApp if customer has a phone number
-    if (data.customerPhone) {
+    // All 3 email steps exhausted — check if WhatsApp is enabled before escalating
+    const brandRows = await db
+      .select({ whatsappEnabled: merchantBrandSettings.whatsappEnabled })
+      .from(merchantBrandSettings)
+      .where(eq(merchantBrandSettings.merchantId, data.merchantId))
+      .limit(1);
+
+    const whatsappEnabled = brandRows[0]?.whatsappEnabled ?? false;
+
+    if (whatsappEnabled && data.customerPhone) {
       // TODO: Implement WhatsApp job dispatch
       console.log(`[RecoveryWorker] Email sequence complete for payment ${data.failedPaymentId}. Would escalate to WhatsApp.`);
     } else {
-      // No phone number — mark as cancelled (exhausted all outreach options)
+      // Determine why we're stopping
+      const cancellationReason = !whatsappEnabled
+        ? 'email_sequence_exhausted_whatsapp_disabled'
+        : 'email_sequence_exhausted_no_phone';
+
       await paymentQueries.updateFailedPaymentStatus(db, data.failedPaymentId, {
         status: 'cancelled',
+        cancellationReason,
       });
-      console.log(`[RecoveryWorker] No phone number for payment ${data.failedPaymentId}. Marking as cancelled.`);
+      console.log(
+        `[RecoveryWorker] Payment ${data.failedPaymentId} — all outreach exhausted (${cancellationReason}). Marking cancelled.`
+      );
     }
   }
 

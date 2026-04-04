@@ -136,6 +136,7 @@ export const paymentQueries = {
       recoveredAt?: Date;
       recoveredAmountPaise?: number;
       recoveryAttributedToFynback?: boolean;
+      cancellationReason?: string;
     }
   ) => {
     return db
