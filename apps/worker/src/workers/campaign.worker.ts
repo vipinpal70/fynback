@@ -224,28 +224,36 @@ async function handleScheduleCampaign(
     return;
   }
 
-  // ── 1. Concurrent-failure dedup check ──────────────────────────────────
+  // ── 1a. 5-hour dedup window: same contact + same amount ────────────────
+  // Catches gateway retries that generate a new failed_payment record
+  // (different payment ID, same customer contact + same charge amount).
+  // Matches on phone OR email, any run status — a recently-recovered charge
+  // is still a duplicate within the window.
+  const recentRun = await campaignQueries.getRecentRunForContact(db, {
+    merchantId: data.merchantId,
+    customerEmail: data.customerEmail,
+    customerPhone: data.customerPhone,
+    amountPaise: data.amountPaise,
+    windowMs: 5 * 60 * 60 * 1000,
+  });
+
+  if (recentRun) {
+    console.log(
+      `[CampaignWorker] Dedup: run ${recentRun.id} (${recentRun.status}) already exists ` +
+      `for same contact+amount within 5h — skipping payment ${data.failedPaymentId}`
+    );
+    return;
+  }
+
+  // ── 1b. Active-run check: same customer, different amount ───────────────
+  // If the customer has an ACTIVE run for a different amount (different subscription
+  // or billing period), cancel the old one and start fresh.
   const existingRun = await campaignQueries.getActiveRunForCustomer(db, data.customerId);
 
-  if (existingRun) {
-    const existingAmount = existingRun.payment.amountPaise;
-    const newAmount = data.amountPaise;
-
-    if (existingAmount === newAmount) {
-      // Same amount → this is likely the same subscription retrying (gateway duplicate).
-      // Continue the existing campaign — do NOT start a new one.
-      console.log(
-        `[CampaignWorker] Customer ${data.customerId} already has an active run for ` +
-        `same amount ${newAmount} — skipping new campaign`
-      );
-      return;
-    }
-
-    // Different amount → different subscription or billing period.
-    // Cancel the old run and start a new one.
+  if (existingRun && existingRun.payment.amountPaise !== data.amountPaise) {
     console.log(
-      `[CampaignWorker] Customer ${data.customerId} has active run for amount ${existingAmount}, ` +
-      `new failure is ${newAmount} — cancelling old run and starting new campaign`
+      `[CampaignWorker] Customer ${data.customerId} has active run for amount ${existingRun.payment.amountPaise}, ` +
+      `new failure is ${data.amountPaise} — cancelling old run and starting new campaign`
     );
 
     await campaignQueue.add('cancel_campaign_run', {
@@ -257,9 +265,9 @@ async function handleScheduleCampaign(
       customerEmail: data.customerEmail,
       customerPhone: data.customerPhone,
       customerName: data.customerName,
-      amountPaise: existingAmount,
+      amountPaise: existingRun.payment.amountPaise,
       currency: data.currency,
-      merchantFromEmail: '',    // Not sending a recovery email here — just cancelling
+      merchantFromEmail: '',
       merchantFromName: '',
       merchantCompanyName: '',
     } satisfies CancelCampaignRunJobData, { priority: 1 });

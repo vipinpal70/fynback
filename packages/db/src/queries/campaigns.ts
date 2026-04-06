@@ -10,7 +10,7 @@
  *   campaign_run_steps → schedule steps, bulk-cancel on recovery
  */
 
-import { eq, and, isNull, inArray, desc, sql } from 'drizzle-orm';
+import { eq, and, isNull, inArray, desc, sql, or, gt } from 'drizzle-orm';
 import type { Database } from '../index';
 import {
   customers,
@@ -422,6 +422,58 @@ export const campaignQueries = {
           eq(campaignRuns.status, 'active')
         )
       )
+      .limit(1);
+
+    return rows[0] ?? null;
+  },
+
+  /**
+   * Dedup guard: returns an existing run for the same contact + amount
+   * started within the given time window (default 5 hours).
+   *
+   * Matches on phone OR email so gateway retries that create a new
+   * failed_payment record (different ID, same contact) are still caught.
+   * Any run status counts — a recently-recovered or cancelled run for the
+   * same charge is still a duplicate.
+   */
+  getRecentRunForContact: async (
+    db: Database,
+    opts: {
+      merchantId: string;
+      customerEmail: string | null | undefined;
+      customerPhone: string | null | undefined;
+      amountPaise: number;
+      windowMs?: number; // default 5 hours
+    }
+  ) => {
+    const { merchantId, customerEmail, customerPhone, amountPaise, windowMs = 5 * 60 * 60 * 1000 } = opts;
+
+    // Must have at least one contact to match on
+    if (!customerEmail && !customerPhone) return null;
+
+    const since = new Date(Date.now() - windowMs);
+
+    // Build contact condition: phone OR email match (whichever are available)
+    const contactConditions = [];
+    if (customerPhone) contactConditions.push(eq(failedPayments.customerPhone, customerPhone));
+    if (customerEmail) contactConditions.push(eq(failedPayments.customerEmail, customerEmail));
+    const contactMatch = contactConditions.length === 1
+      ? contactConditions[0]
+      : or(...contactConditions)!;
+
+    const rows = await db
+      .select({ id: campaignRuns.id, startedAt: campaignRuns.startedAt, status: campaignRuns.status })
+      .from(campaignRuns)
+      .innerJoin(failedPayments, eq(campaignRuns.failedPaymentId, failedPayments.id))
+      .where(
+        and(
+          eq(campaignRuns.merchantId, merchantId),
+          eq(failedPayments.amountPaise, amountPaise),
+          gt(campaignRuns.startedAt, since),
+          contactMatch,
+        )
+      )
+      .orderBy(desc(campaignRuns.startedAt))
       .limit(1);
 
     return rows[0] ?? null;
