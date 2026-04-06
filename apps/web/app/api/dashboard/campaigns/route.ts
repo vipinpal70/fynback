@@ -70,6 +70,7 @@ export async function GET(req: NextRequest) {
           db.select({
             customerName: failedPayments.customerName,
             customerEmail: failedPayments.customerEmail,
+            customerPhone: failedPayments.customerPhone,
             amountPaise: failedPayments.amountPaise,
             currency: failedPayments.currency,
           }).from(failedPayments).where(eq(failedPayments.id, run.failedPaymentId)).limit(1),
@@ -93,6 +94,7 @@ export async function GET(req: NextRequest) {
           ...run,
           customerName: fp?.customerName ?? null,
           customerEmail: fp?.customerEmail ?? null,
+          customerPhone: fp?.customerPhone ?? null,
           amountPaise: fp?.amountPaise ?? 0,
           currency: fp?.currency ?? 'INR',
           templateName: templateRows[0]?.name ?? 'Campaign',

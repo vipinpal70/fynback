@@ -77,6 +77,7 @@ interface CampaignRun {
   failedPaymentId: string;
   customerName: string | null;
   customerEmail: string | null;
+  customerPhone: string | null;
   amountPaise: number;
   currency: string;
   templateName: string;
@@ -106,6 +107,21 @@ function formatAmount(amountPaise: number, currency: string) {
   const amount = amountPaise / 100;
   if (currency === "INR") return `₹${amount.toLocaleString("en-IN")}`;
   return `${currency} ${amount.toFixed(2)}`;
+}
+
+/** Returns true for Razorpay/Cashfree placeholder emails that have no real inbox. */
+function isPlaceholderEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const lower = email.toLowerCase().trim();
+  return lower.startsWith('void@') || lower.startsWith('noreply@razorpay') || lower.startsWith('no-reply@razorpay');
+}
+
+/** Best label to show for a customer — never show a void gateway email. */
+function customerLabel(name: string | null, email: string | null, phone: string | null): string {
+  if (name) return name;
+  if (email && !isPlaceholderEmail(email)) return email;
+  if (phone) return phone;
+  return 'Unknown customer';
 }
 
 function timeAgo(dateStr: string) {
@@ -189,7 +205,7 @@ function PaydayAlertsBanner({ alerts, onDismiss }: { alerts: PaydayAlert[]; onDi
         <div className="flex flex-wrap gap-1.5 mt-2">
           {alerts.slice(0, 3).map((a) => (
             <span key={a.campaignRunId} className="text-[10px] px-2 py-0.5 rounded-md bg-rx-overlay text-rx-text-secondary font-mono">
-              {a.customerEmail || a.customerName || "Customer"} · {formatAmount(a.amountPaise, a.currency)}
+              {customerLabel(a.customerName, a.customerEmail, null)} · {formatAmount(a.amountPaise, a.currency)}
             </span>
           ))}
           {alerts.length > 3 && (
@@ -696,7 +712,7 @@ function RunRow({
   onPauseOffer: (runId: string, action: "approve" | "reject") => void;
   actionLoading: string | null;
 }) {
-  const customerDisplay = run.customerName || run.customerEmail || "Unknown customer";
+  const customerDisplay = customerLabel(run.customerName, run.customerEmail, run.customerPhone);
   const amount = formatAmount(run.amountPaise, run.currency);
 
   return (

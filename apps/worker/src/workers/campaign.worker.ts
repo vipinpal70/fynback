@@ -522,7 +522,7 @@ async function handleExecuteStep(
   let whatsappEnabled = false;
   let whatsappTemplatesApproved = false;
 
-  if (data.channel === 'whatsapp' || data.channel === 'sms') {
+  if (data.channel === 'whatsapp' || data.channel === 'sms' || effectiveChannel === 'whatsapp' || effectiveChannel === 'sms') {
     const brandRow = await db
       .select({
         whatsappEnabled: merchantBrandSettings.whatsappEnabled,
@@ -555,11 +555,29 @@ async function handleExecuteStep(
 
   // ── Send via the appropriate channel ───────────────────────────────────
   let providerMessageId: string | undefined;
-  // sentChannel may differ from data.channel when WhatsApp falls back to SMS
-  let sentChannel: 'email' | 'whatsapp' | 'sms' = data.channel;
+  // effectiveChannel re-routes email→whatsapp when email is a gateway placeholder
+  // (handles jobs that were scheduled before the validate step learned to detect void emails)
+  let effectiveChannel: 'email' | 'whatsapp' | 'sms' = data.channel;
+  if (data.channel === 'email' && isPlaceholderEmail(data.customerEmail ?? null)) {
+    if (data.customerPhone) {
+      effectiveChannel = 'whatsapp'; // WhatsApp block will fall back to SMS if needed
+      console.log(
+        `[CampaignWorker] Rerouting step ${data.stepNumber} from email (placeholder) → whatsapp/sms for phone ${data.customerPhone}`
+      );
+    } else {
+      // No phone either — skip the step
+      console.warn(`[CampaignWorker] Placeholder email and no phone — marking step ${data.stepNumber} skipped`);
+      if (data.campaignRunStepId) {
+        await campaignQueries.updateRunStepStatus(db, data.campaignRunStepId, 'skipped');
+      }
+      return;
+    }
+  }
+  // sentChannel may differ from effectiveChannel when WhatsApp falls back to SMS
+  let sentChannel: 'email' | 'whatsapp' | 'sms' = effectiveChannel;
 
   try {
-    if (data.channel === 'email' && data.customerEmail) {
+    if (effectiveChannel === 'email' && data.customerEmail) {
       const result = await resend.emails.send({
         from: `${data.merchantFromName} <${data.merchantFromEmail}>`,
         to: data.customerEmail,
@@ -576,7 +594,7 @@ async function handleExecuteStep(
       });
       providerMessageId = result.data?.id;
 
-    } else if (data.channel === 'whatsapp' && data.customerPhone) {
+    } else if (effectiveChannel === 'whatsapp' && data.customerPhone) {
       const whatsappReady = whatsappEnabled && whatsappTemplatesApproved && !!interaktApiKey;
 
       if (whatsappReady) {
@@ -622,12 +640,12 @@ async function handleExecuteStep(
         return;
       }
 
-    } else if (data.channel === 'sms' && data.customerPhone) {
+    } else if (effectiveChannel === 'sms' && data.customerPhone) {
       providerMessageId = await sendSms(data.customerPhone, bodyText, data.merchantId);
 
     } else {
       console.warn(
-        `[CampaignWorker] Channel ${data.channel} has no valid contact info — marking step skipped`
+        `[CampaignWorker] Channel ${effectiveChannel} has no valid contact info — marking step skipped`
       );
       if (data.campaignRunStepId) {
         await campaignQueries.updateRunStepStatus(db, data.campaignRunStepId, 'skipped');
