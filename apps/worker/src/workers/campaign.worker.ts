@@ -33,6 +33,12 @@ import {
   type PaydayNotifyJobData,
 } from '@fynback/queue';
 import { formatINR } from '@fynback/shared';
+import { decrypt } from '@fynback/crypto';
+import {
+  sendDunningWhatsApp,
+  sendRecoveryConfirmationWhatsApp,
+  assignInteraktChat,
+} from '../lib/interakt';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Clients
@@ -506,6 +512,47 @@ async function handleExecuteStep(
     amount: vars.amount,
   });
 
+  // ── Load merchant WhatsApp/SMS settings from DB ───────────────────────────
+  // We load this lazily (only when needed) to avoid unnecessary DB queries
+  // for email-only campaigns. The brand settings were already loaded at schedule
+  // time but the encrypted API keys are intentionally NOT embedded in job payloads.
+  let interaktApiKey: string | undefined;
+  let smsSenderId: string | undefined;
+  let smsEnabled = false;
+  let whatsappEnabled = false;
+  let whatsappTemplatesApproved = false;
+
+  if (data.channel === 'whatsapp' || data.channel === 'sms') {
+    const brandRow = await db
+      .select({
+        whatsappEnabled: merchantBrandSettings.whatsappEnabled,
+        whatsappTemplatesApproved: merchantBrandSettings.whatsappTemplatesApproved,
+        interaktApiKeyEncrypted: merchantBrandSettings.interaktApiKeyEncrypted,
+        smsEnabled: merchantBrandSettings.smsEnabled,
+        msg91ApiKeyEncrypted: merchantBrandSettings.msg91ApiKeyEncrypted,
+        msg91SenderId: merchantBrandSettings.msg91SenderId,
+      })
+      .from(merchantBrandSettings)
+      .where(eq(merchantBrandSettings.merchantId, data.merchantId))
+      .limit(1);
+
+    const brand = brandRow[0];
+    if (brand) {
+      whatsappEnabled = brand.whatsappEnabled;
+      whatsappTemplatesApproved = brand.whatsappTemplatesApproved;
+      smsEnabled = brand.smsEnabled;
+      smsSenderId = brand.msg91SenderId ?? undefined;
+
+      if (brand.interaktApiKeyEncrypted) {
+        try {
+          interaktApiKey = decrypt(brand.interaktApiKeyEncrypted);
+        } catch (err) {
+          console.error(`[CampaignWorker] Failed to decrypt Interakt API key for merchant ${data.merchantId}: ${err}`);
+        }
+      }
+    }
+  }
+
   // ── Send via the appropriate channel ───────────────────────────────────
   let providerMessageId: string | undefined;
   let sendError: string | undefined;
@@ -529,7 +576,25 @@ async function handleExecuteStep(
       providerMessageId = result.data?.id;
 
     } else if (data.channel === 'whatsapp' && data.customerPhone) {
-      providerMessageId = await sendWhatsApp(data.customerPhone, bodyText, data);
+      if (!whatsappEnabled) {
+        console.warn(`[CampaignWorker] WhatsApp disabled for merchant ${data.merchantId} — skipping`);
+      } else if (!whatsappTemplatesApproved) {
+        console.warn(`[CampaignWorker] WhatsApp templates not yet approved for merchant ${data.merchantId} — skipping`);
+      } else if (!interaktApiKey) {
+        console.warn(`[CampaignWorker] No Interakt API key for merchant ${data.merchantId} — skipping WhatsApp`);
+      } else {
+        providerMessageId = await sendDunningWhatsApp({
+          apiKey: interaktApiKey,
+          phone: data.customerPhone,
+          customerName: data.customerName,
+          customerEmail: data.customerEmail,
+          amountFormatted: formatAmount(data.amountPaise, data.currency),
+          merchantName: data.merchantCompanyName,
+          paymentLink: data.merchantCheckoutUrl,
+          stepNumber: data.stepNumber,
+          campaignRunId: data.campaignRunId,
+        });
+      }
 
     } else if (data.channel === 'sms' && data.customerPhone) {
       providerMessageId = await sendSms(data.customerPhone, bodyText, data.merchantId);
@@ -590,6 +655,13 @@ async function handleExecuteStep(
     runUpdates.completedAt = new Date();
     // Notify merchant the sequence is exhausted
     await notifyMerchantExhausted(data);
+    // Assign chat to merchant's agent in Interakt so they can do personal outreach
+    if (data.channel === 'whatsapp' && data.customerPhone && interaktApiKey) {
+      await assignInteraktChat(interaktApiKey, {
+        customerPhone: data.customerPhone,
+        agentEmail: data.merchantFromEmail, // merchant's email = their Interakt agent login
+      });
+    }
   }
 
   await campaignQueries.updateCampaignRun(db, data.campaignRunId, runUpdates);
@@ -653,8 +725,9 @@ async function handleCancelRun(
     companyName = merchantRows[0]?.companyName ?? 'Our service';
   }
 
+  const amount = formatAmount(data.amountPaise, data.currency);
+
   if (fromEmail && data.customerEmail) {
-    const amount = formatAmount(data.amountPaise, data.currency);
     await resend.emails.send({
       from: `${fromName || 'Our Team'} <${fromEmail}>`,
       to: data.customerEmail,
@@ -662,6 +735,39 @@ async function handleCancelRun(
       html: buildRecoveryConfirmationEmail({ ...data, merchantFromName: fromName, merchantFromEmail: fromEmail, merchantCompanyName: companyName }, amount),
       text: `Hi ${data.customerName ?? 'there'},\n\nGreat news! Your payment of ${amount} has been received. Your ${companyName} subscription is fully active.\n\nThank you!\n\n— ${companyName} Team`,
     });
+  }
+
+  // Also send WhatsApp recovery confirmation (best-effort — non-blocking)
+  if (data.customerPhone) {
+    // Load and decrypt Interakt API key from DB
+    let interaktApiKey: string | undefined;
+    try {
+      const brandRow = await db
+        .select({
+          whatsappEnabled: merchantBrandSettings.whatsappEnabled,
+          interaktApiKeyEncrypted: merchantBrandSettings.interaktApiKeyEncrypted,
+        })
+        .from(merchantBrandSettings)
+        .where(eq(merchantBrandSettings.merchantId, data.merchantId))
+        .limit(1);
+
+      const brand = brandRow[0];
+      if (brand?.whatsappEnabled && brand.interaktApiKeyEncrypted) {
+        interaktApiKey = decrypt(brand.interaktApiKeyEncrypted);
+      }
+    } catch {
+      // Non-fatal — email confirmation already sent above
+    }
+
+    if (interaktApiKey) {
+      await sendRecoveryConfirmationWhatsApp({
+        apiKey: interaktApiKey,
+        phone: data.customerPhone,
+        customerName: data.customerName,
+        amountFormatted: amount,
+        merchantName: companyName,
+      });
+    }
   }
 
   console.log(`[CampaignWorker] Run ${data.campaignRunId} cancelled, ${scheduledSteps.length} steps removed`);
@@ -812,48 +918,7 @@ async function checkWhatsAppAvailability(phone: string): Promise<boolean | null>
   }
 }
 
-/**
- * Sends a WhatsApp message via Interakt API.
- * Returns the provider's message ID for delivery tracking.
- */
-async function sendWhatsApp(
-  phone: string,
-  bodyText: string,
-  data: ExecuteCampaignStepJobData
-): Promise<string | undefined> {
-  const apiKey = process.env.INTERAKT_API_KEY;
-  if (!apiKey) {
-    console.warn('[CampaignWorker] INTERAKT_API_KEY not set — skipping WhatsApp send');
-    return undefined;
-  }
-
-  const normalized = phone.replace(/\D/g, '');
-  const countryCode = normalized.startsWith('91') ? '91' : '91';
-  const phoneNum = normalized.startsWith('91') ? normalized.slice(2) : normalized;
-
-  const response = await fetch('https://api.interakt.ai/v1/public/message/', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${Buffer.from(apiKey).toString('base64')}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      countryCode,
-      phoneNumber: phoneNum,
-      callbackData: `campaign_run:${data.campaignRunId}:step:${data.stepNumber}`,
-      type: 'Text',
-      data: { message: bodyText },
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Interakt WhatsApp API error ${response.status}: ${err}`);
-  }
-
-  const json = await response.json() as { id?: string };
-  return json.id;
-}
+// WhatsApp send is handled by src/lib/interakt.ts (sendDunningWhatsApp)
 
 /**
  * Sends an SMS via MSG91 API.
