@@ -170,12 +170,36 @@ async function handleValidateChannels(
     }
   }
 
-  // ── 3. Check WhatsApp availability ─────────────────────────────────────
+  // ── 3. Check WhatsApp availability via Interakt ────────────────────────
+  // Load the merchant's Interakt API key so we can use the Interakt user
+  // lookup API — no separate Meta credentials needed.
   let hasWhatsapp: boolean | null = null;
   if (data.customerPhone) {
-    hasWhatsapp = await checkWhatsAppAvailability(data.customerPhone);
-    await campaignQueries.saveWhatsappCheckResult(db, customer.id, hasWhatsapp ?? false);
-    console.log(`[CampaignWorker] WhatsApp check for ${data.customerPhone}: ${hasWhatsapp}`);
+    let interaktKeyForCheck: string | undefined;
+    try {
+      const brandRow = await db
+        .select({ interaktApiKeyEncrypted: merchantBrandSettings.interaktApiKeyEncrypted })
+        .from(merchantBrandSettings)
+        .where(eq(merchantBrandSettings.merchantId, data.merchantId))
+        .limit(1);
+      const enc = brandRow[0]?.interaktApiKeyEncrypted;
+      if (enc) interaktKeyForCheck = decrypt(enc).trim() || undefined;
+    } catch {
+      // Key unavailable — proceed with null (optimistic fallback below)
+    }
+
+    hasWhatsapp = await checkWhatsAppAvailability(data.customerPhone, interaktKeyForCheck);
+
+    // null = check couldn't run (no API key) → optimistic true so we try WhatsApp.
+    // Interakt handles delivery failure; our SMS fallback covers the rest.
+    const effectiveHasWhatsapp = hasWhatsapp ?? true;
+
+    await campaignQueries.saveWhatsappCheckResult(db, customer.id, effectiveHasWhatsapp);
+    console.log(
+      `[CampaignWorker] WhatsApp check for ${data.customerPhone}: ` +
+      `${hasWhatsapp === null ? 'skipped (no key)' : hasWhatsapp} → using ${effectiveHasWhatsapp}`
+    );
+    hasWhatsapp = effectiveHasWhatsapp;
   }
 
   // ── 4. Dispatch schedule_campaign job ──────────────────────────────────
@@ -553,9 +577,20 @@ async function handleExecuteStep(
 
       if (brand.interaktApiKeyEncrypted) {
         try {
-          interaktApiKey = decrypt(brand.interaktApiKeyEncrypted);
+          const decrypted = decrypt(brand.interaktApiKeyEncrypted).trim();
+          if (decrypted) {
+            interaktApiKey = decrypted;
+          } else {
+            console.error(
+              `[CampaignWorker] Interakt API key for merchant ${data.merchantId} decrypted to empty string — ` +
+              `check ENCRYPTION_SECRET matches the value used at onboarding`
+            );
+          }
         } catch (err) {
-          console.error(`[CampaignWorker] Failed to decrypt Interakt API key for merchant ${data.merchantId}: ${err}`);
+          console.error(
+            `[CampaignWorker] Failed to decrypt Interakt API key for merchant ${data.merchantId}: ${err} — ` +
+            `ENCRYPTION_SECRET in worker env likely differs from the one used when the key was saved`
+          );
         }
       }
     }
@@ -945,48 +980,72 @@ async function checkEmailMx(email: string): Promise<boolean> {
 }
 
 /**
- * Checks if a phone number has an active WhatsApp account via Meta Business API.
+ * Checks if a phone number is a known WhatsApp user via the Interakt user lookup API.
  *
- * Uses the Cloud API phone number lookup endpoint.
- * Requires WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID env vars.
+ * Uses the merchant's own Interakt API key — no separate Meta credentials needed.
+ * Endpoint: GET /v1/public/apis/users/phone_number/{phone_without_country_code}
  *
- * Returns null if the API is unavailable (don't fail the whole campaign).
+ * Return values:
+ *   true  — user found in Interakt with channel_type = "Whatsapp"
+ *   false — user found but on a different channel (not WhatsApp)
+ *   null  — user not found OR API unavailable → caller defaults to optimistic true
+ *
+ * WHY null instead of false when not found:
+ * A customer who has never interacted with the merchant's Interakt account won't
+ * appear in the lookup even if they have WhatsApp. Treating "not found" as false
+ * would silently skip WhatsApp for most new customers.
  */
-async function checkWhatsAppAvailability(phone: string): Promise<boolean | null> {
-  const token = process.env.WHATSAPP_ACCESS_TOKEN;
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-
-  if (!token || !phoneNumberId) {
-    console.warn('[CampaignWorker] WhatsApp API credentials not configured — skipping check');
+async function checkWhatsAppAvailability(
+  phone: string,
+  interaktApiKey?: string
+): Promise<boolean | null> {
+  if (!interaktApiKey) {
+    // No API key available — can't check, caller uses optimistic default
     return null;
   }
 
-  // Normalize phone number to E.164 format (remove spaces, dashes, leading zeros)
-  const normalized = phone.replace(/\D/g, '');
-  const e164 = normalized.startsWith('91') ? `+${normalized}` : `+91${normalized}`;
+  // Interakt requires phone without country code — strip leading +91 / 91
+  const digits = phone.replace(/\D/g, '');
+  const phoneWithoutCC = digits.startsWith('91') && digits.length > 10
+    ? digits.slice(2)
+    : digits;
 
   try {
-    const response = await fetch(
-      `https://graph.facebook.com/v18.0/${phoneNumberId}/phone_numbers?phone=${encodeURIComponent(e164)}`,
+    const res = await fetch(
+      `https://api.interakt.ai/v1/public/apis/users/phone_number/${phoneWithoutCC}`,
       {
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: `Basic ${interaktApiKey}`,
           'Content-Type': 'application/json',
         },
       }
     );
 
-    if (!response.ok) {
-      const body = await response.text();
-      console.warn(`[CampaignWorker] WhatsApp API returned ${response.status}: ${body}`);
+    if (res.status === 404) {
+      // User genuinely not in Interakt yet — unknown, not "no WhatsApp"
       return null;
     }
 
-    const json = await response.json() as { data?: unknown[] };
-    // If the phone number is registered on WhatsApp, the data array is non-empty
-    return Array.isArray(json.data) && json.data.length > 0;
+    if (!res.ok) {
+      console.warn(`[CampaignWorker] Interakt user lookup ${res.status} for ${phoneWithoutCC}`);
+      return null;
+    }
+
+    const json = await res.json() as {
+      result?: boolean;
+      data?: { customers?: Array<{ channel_type?: string }> };
+    };
+
+    const customers = json.data?.customers ?? [];
+    if (customers.length === 0) return null; // not found → unknown
+
+    // If any record has channel_type Whatsapp → confirmed WhatsApp user
+    const hasWA = customers.some(
+      (c) => c.channel_type?.toLowerCase() === 'whatsapp'
+    );
+    return hasWA ? true : false;
   } catch (err) {
-    console.warn(`[CampaignWorker] WhatsApp check failed: ${err}`);
+    console.warn(`[CampaignWorker] Interakt WhatsApp check failed for ${phoneWithoutCC}: ${err}`);
     return null;
   }
 }
