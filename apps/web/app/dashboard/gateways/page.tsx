@@ -492,7 +492,7 @@ function ConnectedCard({
 }: {
   gw: GatewayStatus;
   onDisconnect: (id: string) => void;
-  onResync: (id: string) => Promise<void>;
+  onResync: (id: string) => Promise<{ fetched: number; inserted: number; skipped: number } | null>;
   initialWebhookResult?: ConnectResult | null;
 }) {
   const meta = GATEWAY_META[gw.gatewayName] ?? { color: "#6b7280", label: gw.gatewayName };
@@ -507,7 +507,8 @@ function ConnectedCard({
   async function handleResync() {
     setSyncing(true);
     try {
-      await onResync(gw.id);
+      const result = await onResync(gw.id);
+      if (result) setSyncResult(result);
     } finally {
       setSyncing(false);
     }
@@ -659,10 +660,9 @@ export default function GatewaysPage() {
     });
     const data = await r.json();
     if (data.fetched !== undefined) {
-      setGateways((prev) =>
-        prev.map((g) => (g.id === id ? { ...g, _syncResult: data } : g))
-      );
+      return { fetched: data.fetched, inserted: data.inserted, skipped: data.skipped } as { fetched: number; inserted: number; skipped: number };
     }
+    return null;
   }
 
   return (

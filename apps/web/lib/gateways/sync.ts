@@ -113,8 +113,11 @@ export async function syncGatewayHistory(
       } else {
         skipped++;
       }
-    } catch {
+    } catch (err) {
       skipped++;
+      if (skipped <= 3) {
+        console.error(`[SyncGateway] Failed to insert payment ${p.id}:`, err);
+      }
     }
   }
 

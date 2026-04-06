@@ -279,7 +279,12 @@ export const completeOnboarding = async (formData: FormData) => {
             gatewayApiKey,
             gatewayApiSecret,
             plan  // used to pick the right system default campaign template
-          ).catch((err) => console.error('[completeOnboarding] gateway sync error:', err))
+          ).then((syncResult) => {
+            console.log(
+              `[completeOnboarding] Historical sync complete for merchant ${result.merchantId}:`,
+              `fetched=${syncResult.fetched} inserted=${syncResult.inserted} skipped=${syncResult.skipped}`
+            )
+          }).catch((err) => console.error('[completeOnboarding] gateway sync error — payments NOT synced:', err))
 
           // Send the gateway-connected email with webhook URL + secret so the merchant
           // can manually configure it in their Razorpay dashboard if auto-registration failed.

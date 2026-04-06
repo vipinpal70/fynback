@@ -102,7 +102,7 @@ export async function fetchFailedPayments(
   secret: string,
   fromTs: number,
   toTs: number,
-  maxPages = 10  // safety cap — 10 × 100 = 1000 payments per sync
+  maxPages = 20  // safety cap — 20 × 100 = 2000 payments per sync
 ): Promise<RazorpayPayment[]> {
   const auth = authHeader(key, secret);
   const failed: RazorpayPayment[] = [];
@@ -112,7 +112,11 @@ export async function fetchFailedPayments(
   for (let page = 0; page < maxPages; page++) {
     const url = `${BASE}/payments?count=${count}&from=${fromTs}&to=${toTs}&skip=${skip}`;
     const r = await fetch(url, { headers: { Authorization: auth } });
-    if (!r.ok) break;
+
+    if (!r.ok) {
+      const errText = await r.text().catch(() => '');
+      throw new Error(`Razorpay API error ${r.status} on page ${page + 1}: ${errText}`);
+    }
 
     const body = await r.json();
     const items: RazorpayPayment[] = body.items ?? [];
@@ -121,7 +125,7 @@ export async function fetchFailedPayments(
       if (p.status === 'failed') failed.push(p);
     }
 
-    if (items.length < count) break; // last page
+    if (items.length < count) break; // last page — we're done
     skip += count;
   }
 

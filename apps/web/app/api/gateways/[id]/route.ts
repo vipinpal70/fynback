@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getMerchantIdFromClerkUserId } from '@/lib/merchant';
 import { decrypt } from '@/lib/crypto';
 import { syncGatewayHistory } from '@/lib/gateways/sync';
-import { createDb, gatewayConnections, eq, and } from '@fynback/db';
+import { createDb, gatewayConnections, merchants, eq, and } from '@fynback/db';
 import { cacheDelete } from '@/lib/cache/redis';
 
 const db = createDb(process.env.DATABASE_URL!);
@@ -67,13 +67,21 @@ export async function POST(
   const apiKey = decrypt(conn.apiKeyEncrypted);
   const apiSecret = decrypt(conn.apiSecretEncrypted);
 
+  // Load merchant's current plan so the right campaign template is used
+  const [merchant] = await db
+    .select({ plan: merchants.plan })
+    .from(merchants)
+    .where(eq(merchants.id, merchantId))
+    .limit(1);
+
   try {
     const result = await syncGatewayHistory(
       merchantId,
       conn.id,
       conn.gatewayName as 'razorpay',
       apiKey,
-      apiSecret
+      apiSecret,
+      merchant?.plan ?? 'trial',
     );
     return NextResponse.json({ synced: true, ...result });
   } catch (err) {
