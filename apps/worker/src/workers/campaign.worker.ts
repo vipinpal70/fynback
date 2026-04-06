@@ -152,12 +152,12 @@ async function handleValidateChannels(
     throw new Error(`Failed to upsert customer for payment ${data.failedPaymentId}`);
   }
 
-  // ── 2. Validate email (MX check & Placeholder block) ────────────────────
+  // ── 2. Validate email (MX check & placeholder block) ───────────────────
   let emailValid = true;
   if (data.customerEmail) {
-    if (data.customerEmail === 'void@razorpay.com') {
+    if (isPlaceholderEmail(data.customerEmail)) {
       emailValid = false;
-      console.log(`[CampaignWorker] Email is Razorpay placeholder — marked invalid`);
+      console.log(`[CampaignWorker] Email "${data.customerEmail}" is a gateway placeholder — marked invalid`);
     } else {
       emailValid = await checkEmailMx(data.customerEmail);
       if (!emailValid) {
@@ -555,7 +555,8 @@ async function handleExecuteStep(
 
   // ── Send via the appropriate channel ───────────────────────────────────
   let providerMessageId: string | undefined;
-  let sendError: string | undefined;
+  // sentChannel may differ from data.channel when WhatsApp falls back to SMS
+  let sentChannel: 'email' | 'whatsapp' | 'sms' = data.channel;
 
   try {
     if (data.channel === 'email' && data.customerEmail) {
@@ -576,24 +577,49 @@ async function handleExecuteStep(
       providerMessageId = result.data?.id;
 
     } else if (data.channel === 'whatsapp' && data.customerPhone) {
-      if (!whatsappEnabled) {
-        console.warn(`[CampaignWorker] WhatsApp disabled for merchant ${data.merchantId} — skipping`);
-      } else if (!whatsappTemplatesApproved) {
-        console.warn(`[CampaignWorker] WhatsApp templates not yet approved for merchant ${data.merchantId} — skipping`);
-      } else if (!interaktApiKey) {
-        console.warn(`[CampaignWorker] No Interakt API key for merchant ${data.merchantId} — skipping WhatsApp`);
+      const whatsappReady = whatsappEnabled && whatsappTemplatesApproved && !!interaktApiKey;
+
+      if (whatsappReady) {
+        try {
+          providerMessageId = await sendDunningWhatsApp({
+            apiKey: interaktApiKey!,
+            phone: data.customerPhone,
+            customerName: data.customerName,
+            customerEmail: data.customerEmail,
+            amountFormatted: formatAmount(data.amountPaise, data.currency),
+            merchantName: data.merchantCompanyName,
+            paymentLink: data.merchantCheckoutUrl,
+            stepNumber: data.stepNumber,
+            campaignRunId: data.campaignRunId,
+          });
+        } catch (waErr) {
+          // WhatsApp API call failed — try SMS fallback before giving up
+          console.warn(`[CampaignWorker] WhatsApp send failed: ${waErr} — trying SMS fallback`);
+          providerMessageId = undefined; // will trigger SMS fallback below
+        }
       } else {
-        providerMessageId = await sendDunningWhatsApp({
-          apiKey: interaktApiKey,
-          phone: data.customerPhone,
-          customerName: data.customerName,
-          customerEmail: data.customerEmail,
-          amountFormatted: formatAmount(data.amountPaise, data.currency),
-          merchantName: data.merchantCompanyName,
-          paymentLink: data.merchantCheckoutUrl,
-          stepNumber: data.stepNumber,
-          campaignRunId: data.campaignRunId,
-        });
+        console.warn(
+          `[CampaignWorker] WhatsApp not ready for merchant ${data.merchantId} ` +
+          `(enabled=${whatsappEnabled} approved=${whatsappTemplatesApproved} hasKey=${!!interaktApiKey}) — trying SMS fallback`
+        );
+      }
+
+      // SMS fallback: used when WhatsApp is unavailable or the API call failed
+      if (!providerMessageId && smsEnabled && data.customerPhone) {
+        console.log(`[CampaignWorker] Falling back to SMS for step ${data.stepNumber}`);
+        providerMessageId = await sendSms(data.customerPhone, bodyText, data.merchantId);
+        sentChannel = 'sms';
+      }
+
+      // If still no send and no SMS either, mark step skipped
+      if (!providerMessageId && !smsEnabled) {
+        console.warn(
+          `[CampaignWorker] WhatsApp unavailable and SMS disabled for merchant ${data.merchantId} — marking step skipped`
+        );
+        if (data.campaignRunStepId) {
+          await campaignQueries.updateRunStepStatus(db, data.campaignRunStepId, 'skipped');
+        }
+        return;
       }
 
     } else if (data.channel === 'sms' && data.customerPhone) {
@@ -609,18 +635,18 @@ async function handleExecuteStep(
       return;
     }
   } catch (err) {
-    sendError = err instanceof Error ? err.message : String(err);
-    console.error(`[CampaignWorker] Send failed for step ${data.stepNumber}: ${sendError}`);
+    console.error(`[CampaignWorker] Send failed for step ${data.stepNumber}: ${err}`);
     throw err; // BullMQ will retry
   }
 
   // ── Record outreach event ───────────────────────────────────────────────
+  // Use sentChannel (may be 'sms' when WhatsApp fell back to SMS)
   const outreachEvent = await paymentQueries.insertOutreachEvent(db, {
     failedPaymentId: data.failedPaymentId,
     merchantId: data.merchantId,
-    channel: data.channel,
-    recipientEmail: data.channel === 'email' ? data.customerEmail : undefined,
-    recipientPhone: data.channel !== 'email' ? data.customerPhone : undefined,
+    channel: sentChannel,
+    recipientEmail: sentChannel === 'email' ? data.customerEmail : undefined,
+    recipientPhone: sentChannel !== 'email' ? data.customerPhone : undefined,
     templateId: data.messageTemplateId,
     stepNumber: data.stepNumber,
   });
@@ -851,6 +877,27 @@ function resolveStepChannel(
 // ─────────────────────────────────────────────────────────────────────────────
 // Channel send helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns true for known gateway-generated placeholder emails that have no real inbox.
+ * Razorpay uses void@razorpay.com, Cashfree uses void@cashfree.com, etc.
+ * These must be blocked before MX check — the domains have valid MX records
+ * but the mailboxes don't exist, causing bounces that hurt sender reputation.
+ */
+function isPlaceholderEmail(email: string): boolean {
+  const lower = email.toLowerCase().trim();
+  // Block any void@* pattern (used by Razorpay, Cashfree, and others)
+  if (lower.startsWith('void@')) return true;
+  // Block other known gateway no-reply addresses used as billing placeholders
+  const blocked = [
+    'noreply@razorpay.com',
+    'no-reply@razorpay.com',
+    'billing@razorpay.com',
+    'noreply@cashfree.com',
+    'no-reply@cashfree.com',
+  ];
+  return blocked.includes(lower);
+}
 
 /**
  * MX / DNS validation for an email address.
