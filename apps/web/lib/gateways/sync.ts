@@ -23,7 +23,8 @@ import type { ValidateCustomerChannelsJobData } from '@fynback/queue';
 export interface SyncResult {
   fetched: number;
   inserted: number;
-  skipped: number;  // already existed or errored
+  skipped: number;   // already existed (conflict) or errored
+  firstError?: string; // first insert error, if any — for diagnostics
 }
 
 export async function syncGatewayHistory(
@@ -47,6 +48,7 @@ export async function syncGatewayHistory(
 
   let inserted = 0;
   let skipped = 0;
+  let firstError: string | undefined;
 
   for (const p of payments) {
     try {
@@ -78,7 +80,6 @@ export async function syncGatewayHistory(
 
       if (rows.length > 0) {
         inserted++;
-
         // ── Trigger campaign for this historical failure ──────────────────
         // Only enqueue if we have a way to contact the customer.
         // Priority 2 (lower than live webhooks at priority 1) so real-time
@@ -111,10 +112,14 @@ export async function syncGatewayHistory(
             );
         }
       } else {
+        // onConflictDoNothing returned empty — payment already exists
         skipped++;
+        console.log(`[SyncGateway] Payment ${p.id} already exists in DB (skipped)`);
       }
     } catch (err) {
       skipped++;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!firstError) firstError = `Payment ${p.id}: ${msg}`;
       if (skipped <= 3) {
         console.error(`[SyncGateway] Failed to insert payment ${p.id}:`, err);
       }
@@ -161,5 +166,5 @@ export async function syncGatewayHistory(
     cacheDelete(`settings:merchant:${merchantId}`),
   ]);
 
-  return { fetched: payments.length, inserted, skipped };
+  return { fetched: payments.length, inserted, skipped, firstError };
 }

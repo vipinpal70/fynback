@@ -492,14 +492,14 @@ function ConnectedCard({
 }: {
   gw: GatewayStatus;
   onDisconnect: (id: string) => void;
-  onResync: (id: string) => Promise<{ fetched: number; inserted: number; skipped: number } | null>;
+  onResync: (id: string) => Promise<{ fetched: number; inserted: number; skipped: number; firstError?: string } | null>;
   initialWebhookResult?: ConnectResult | null;
 }) {
   const meta = GATEWAY_META[gw.gatewayName] ?? { color: "#6b7280", label: gw.gatewayName };
   const [showWebhook, setShowWebhook] = useState(!!initialWebhookResult);
   const [syncing, setSyncing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
-  const [syncResult, setSyncResult] = useState<{ inserted: number; fetched: number } | null>(
+  const [syncResult, setSyncResult] = useState<{ inserted: number; fetched: number; skipped: number; firstError?: string } | null>(
     initialWebhookResult?.sync ? initialWebhookResult.sync : null
   );
   const lastSeen = formatRelativeTime(gw.lastWebhookAt);
@@ -570,10 +570,19 @@ function ConnectedCard({
 
           {/* Sync stats */}
           {syncResult && (
-            <div className="flex items-center gap-2 text-[12px] font-body text-rx-text-muted">
-              <CheckCircle2 size={13} className="text-rx-green" />
-              Synced {syncResult.fetched} failed payments this month
-              {syncResult.inserted > 0 && <span className="text-rx-text-secondary">({syncResult.inserted} new)</span>}
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-[12px] font-body text-rx-text-muted">
+                <CheckCircle2 size={13} className="text-rx-green" />
+                Fetched {syncResult.fetched} failed payments from Razorpay
+                {syncResult.inserted > 0 && <span className="text-rx-green">· {syncResult.inserted} saved to DB</span>}
+                {syncResult.skipped > 0 && <span className="text-rx-text-muted">· {syncResult.skipped} skipped</span>}
+              </div>
+              {syncResult.firstError && (
+                <div className="flex items-start gap-2 p-2 rounded-lg bg-rx-red/10 border border-rx-red/20">
+                  <AlertCircle size={12} className="text-rx-red shrink-0 mt-0.5" />
+                  <p className="text-[11px] font-mono text-rx-red break-all">{syncResult.firstError}</p>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -660,7 +669,12 @@ export default function GatewaysPage() {
     });
     const data = await r.json();
     if (data.fetched !== undefined) {
-      return { fetched: data.fetched, inserted: data.inserted, skipped: data.skipped } as { fetched: number; inserted: number; skipped: number };
+      return {
+        fetched: data.fetched,
+        inserted: data.inserted,
+        skipped: data.skipped,
+        firstError: data.firstError,
+      };
     }
     return null;
   }
